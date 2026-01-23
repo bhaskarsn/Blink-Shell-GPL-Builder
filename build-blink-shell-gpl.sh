@@ -4,31 +4,49 @@ set -e
 # Blink Shell Build Script
 # Builds unsigned .ipa for sideloading via signing services
 #
+# HELP_START
 # Usage:
 #   ./build-blink-shell-gpl.sh [options] [version]
 #
-# Options:
-#   --setup-only     Only setup/clone, don't build
-#   --build          Build unsigned .ipa (default)
-#   --clean          Clean build before building
-#   --simulator      Build and run in iOS Simulator
-#   --archive        Create signed archive (requires dev account)
-#   --install        Build and install to connected device (requires dev account)
-#   --keep-build     Keep build-output/ after a successful build
-#   --keep-source    Keep blink-src/ after a successful build
-#   --non-interactive Skip prompts and reuse existing blink-src/
-#   --help           Show this help message
+# Build Options:
+#   --build              Build unsigned .ipa (default)
+#   --clean              Clean build before building
+#   --signed-ipa         Create signed .ipa (requires dev account)
+#   --archive            Create signed archive (requires dev account)
+#   --setup-only         Only setup/clone, don't build
+#
+# Device Options:
+#   --simulator [NAME]   Build and run in iOS Simulator
+#                        Optional: specify simulator by name or UUID
+#   --install [NAME]     Build and install to device (requires dev account)
+#                        Optional: specify device by name or UUID
+#   --devices            List available physical devices and exit
+#   --simulators         List available simulators and exit
+#
+# Source Options:
+#   --version <VERSION>  Specify Blink version to build (e.g., v18.4.2)
+#   --update             Update existing source to specified version
+#   --overwrite          Delete and re-clone source directory
+#   --clean-all          Remove source and build directories, then exit
+#
+# Other Options:
+#   --keep-build         Keep build-output/ after a successful build
+#   --keep-source        Keep blink-src/ after a successful build
+#   --help               Show this help message
 #
 # Examples:
-#   ./build-blink-shell-gpl.sh                    # Build unsigned .ipa
-#   ./build-blink-shell-gpl.sh v18.4.2            # Build specific version
-#   ./build-blink-shell-gpl.sh --setup-only       # Only setup, don't build
-#   ./build-blink-shell-gpl.sh --clean            # Clean build
+#   ./build-blink-shell-gpl.sh                         # Build unsigned .ipa
+#   ./build-blink-shell-gpl.sh --version v18.4.2       # Build specific version
+#   ./build-blink-shell-gpl.sh --simulator "iPhone 16" # Run in specific simulator
+#   ./build-blink-shell-gpl.sh --simulators            # List available simulators
+#   ./build-blink-shell-gpl.sh --overwrite --clean     # Fresh build from scratch
+# HELP_END
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 VERSION="v18.4.2"
 SOURCE_DIR="${SCRIPT_DIR}/blink-src"
 BUILD_DIR="${SCRIPT_DIR}/build-output"
+BUILD_LOG="${BUILD_DIR}/build.log"
 OUTPUT_DIR="${SCRIPT_DIR}/dist"
 OUTPUT_ARCHIVE_PATH=""
 OUTPUT_IPA_PATH=""
@@ -42,9 +60,15 @@ DO_CLEAN=false
 DO_ARCHIVE=false
 DO_INSTALL=false
 DO_SIMULATOR=false
+DO_SIGNED_IPA=false
+DO_LIST_DEVICES=false
+DO_LIST_SIMULATORS=false
 KEEP_BUILD=false
 KEEP_SOURCE=false
-NON_INTERACTIVE=false
+SOURCE_UPDATE=false
+SOURCE_OVERWRITE=false
+TARGET_DEVICE=""
+TARGET_SIMULATOR=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -66,14 +90,60 @@ while [[ $# -gt 0 ]]; do
             DO_ARCHIVE=true
             shift
             ;;
+        --signed-ipa)
+            DO_SIGNED_IPA=true
+            shift
+            ;;
         --install)
             DO_INSTALL=true
+            # Check if next argument is a device name/id (not another flag)
+            if [[ $# -gt 1 && ! "$2" =~ ^-- ]]; then
+                TARGET_DEVICE="$2"
+                shift
+            fi
             shift
             ;;
         --simulator)
             DO_SIMULATOR=true
             DO_BUILD=false
+            # Check if next argument is a simulator name/id (not another flag)
+            if [[ $# -gt 1 && ! "$2" =~ ^-- ]]; then
+                TARGET_SIMULATOR="$2"
+                shift
+            fi
             shift
+            ;;
+        --devices)
+            DO_LIST_DEVICES=true
+            DO_BUILD=false
+            shift
+            ;;
+        --simulators)
+            DO_LIST_SIMULATORS=true
+            DO_BUILD=false
+            shift
+            ;;
+        --version)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --version requires a version argument (e.g., --version v18.4.2)"
+                exit 1
+            fi
+            VERSION="$2"
+            shift 2
+            ;;
+        --update)
+            SOURCE_UPDATE=true
+            shift
+            ;;
+        --overwrite)
+            SOURCE_OVERWRITE=true
+            shift
+            ;;
+        --clean-all)
+            echo "Removing source and build directories..."
+            rm -rf "${SCRIPT_DIR}/blink-src" "${SCRIPT_DIR}/build-output"
+            echo "Done."
+            exit 0
             ;;
         --keep-build)
             KEEP_BUILD=true
@@ -83,20 +153,18 @@ while [[ $# -gt 0 ]]; do
             KEEP_SOURCE=true
             shift
             ;;
-        --non-interactive)
-            NON_INTERACTIVE=true
-            shift
-            ;;
         --help)
-            head -26 "$0" | tail -23
+            awk '/^# HELP_START$/,/^# HELP_END$/' "$0" | grep -v '^# HELP_' | sed 's/^# //' | sed 's/^#$//'
             exit 0
             ;;
         v*)
+            # Backwards compatibility: positional version argument
             VERSION="$1"
             shift
             ;;
         *)
             echo "Unknown option: $1"
+            echo "Use --help for usage information."
             exit 1
             ;;
     esac
@@ -123,6 +191,12 @@ preflight_checks() {
         missing=1
     fi
 
+    if ! command -v jq &> /dev/null; then
+        echo "Error: jq is required but not found."
+        echo "Install with: brew install jq"
+        missing=1
+    fi
+
     if ! command -v xcodebuild &> /dev/null; then
         echo "Error: Xcode is required. Install Xcode and run xcode-select --install."
         missing=1
@@ -138,7 +212,7 @@ preflight_checks() {
         missing=1
     fi
 
-    if [ "$DO_SIMULATOR" = true ]; then
+    if [ "$DO_SIMULATOR" = true ] || [ "$DO_LIST_SIMULATORS" = true ]; then
         if ! xcrun --sdk iphonesimulator --show-sdk-path &> /dev/null; then
             echo "Error: iOS Simulator platform content is missing."
             echo "Install it in Xcode > Settings > Platforms."
@@ -149,6 +223,186 @@ preflight_checks() {
     if [ "$missing" -ne 0 ]; then
         exit 1
     fi
+}
+
+# Get minimum iOS deployment target from project
+get_min_ios_version() {
+    if [ -f "${PROJECT}/project.pbxproj" ]; then
+        grep -m1 'IPHONEOS_DEPLOYMENT_TARGET' "${PROJECT}/project.pbxproj" 2>/dev/null | \
+            sed -E 's/.*= ([0-9.]+);.*/\1/' || echo "16.0"
+    else
+        echo "16.0"
+    fi
+}
+
+# Compare version strings (returns 0 if $1 >= $2)
+version_gte() {
+    [ "$(printf '%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]
+}
+
+# List available devices with iOS version filtering
+list_devices() {
+    local min_ios
+    if [ -f "${PROJECT}/project.pbxproj" ]; then
+        min_ios=$(get_min_ios_version)
+    else
+        min_ios="16.0"
+    fi
+
+    echo "Available devices (minimum iOS $min_ios):"
+    echo ""
+    printf "%-40s %-36s %s\n" "NAME" "IDENTIFIER" "iOS VERSION"
+    printf "%-40s %-36s %s\n" "----" "----------" "-----------"
+
+    xcrun xcdevice list 2>/dev/null | jq -r '
+        .[] | select(.simulator == false and .platform == "com.apple.platform.iphoneos") |
+        "\(.name)\t\(.identifier)\t\(.operatingSystemVersion)"
+    ' 2>/dev/null | while IFS=$'\t' read -r name id version; do
+        # Extract major.minor version for comparison
+        ios_ver=$(echo "$version" | sed -E 's/([0-9]+\.[0-9]+).*/\1/')
+        if version_gte "$ios_ver" "$min_ios"; then
+            printf "%-40s %-36s %s\n" "$name" "$id" "$version"
+        fi
+    done
+
+    local device_count
+    device_count=$(xcrun xcdevice list 2>/dev/null | jq '[.[] | select(.simulator == false and .platform == "com.apple.platform.iphoneos")] | length' 2>/dev/null || echo "0")
+    if [ "$device_count" = "0" ]; then
+        echo "(No devices connected)"
+    fi
+}
+
+# List available simulators with iOS version filtering
+list_simulators() {
+    local min_ios
+    if [ -f "${PROJECT}/project.pbxproj" ]; then
+        min_ios=$(get_min_ios_version)
+    else
+        min_ios="16.0"
+    fi
+
+    echo "Available simulators (minimum iOS $min_ios):"
+    echo ""
+    printf "%-40s %-36s %s\n" "NAME" "IDENTIFIER" "iOS VERSION"
+    printf "%-40s %-36s %s\n" "----" "----------" "-----------"
+
+    xcrun xcdevice list 2>/dev/null | jq -r '
+        .[] | select(.simulator == true and .platform == "com.apple.platform.iphonesimulator") |
+        "\(.name)\t\(.identifier)\t\(.operatingSystemVersion)"
+    ' 2>/dev/null | while IFS=$'\t' read -r name id version; do
+        # Extract major.minor version for comparison
+        ios_ver=$(echo "$version" | sed -E 's/([0-9]+\.[0-9]+).*/\1/')
+        if version_gte "$ios_ver" "$min_ios"; then
+            printf "%-40s %-36s %s\n" "$name" "$id" "$version"
+        fi
+    done
+}
+
+# Search for a device by name or UUID
+# Returns device identifier if found
+device_search() {
+    local search_term="$1"
+    local device_type="$2"  # "device" or "simulator"
+    local min_ios
+
+    if [ -f "${PROJECT}/project.pbxproj" ]; then
+        min_ios=$(get_min_ios_version)
+    else
+        min_ios="16.0"
+    fi
+
+    local platform_filter
+    if [ "$device_type" = "simulator" ]; then
+        platform_filter='select(.simulator == true and .platform == "com.apple.platform.iphonesimulator")'
+    else
+        platform_filter='select(.simulator == false and .platform == "com.apple.platform.iphoneos")'
+    fi
+
+    # Check if search_term looks like a UUID
+    if [[ "$search_term" =~ ^[A-F0-9-]{36}$ ]]; then
+        # Search by UUID
+        xcrun xcdevice list 2>/dev/null | jq -r --arg id "$search_term" "
+            .[] | $platform_filter | select(.identifier == \$id) | .identifier
+        " 2>/dev/null | head -1
+    else
+        # Search by name (case-insensitive partial match)
+        xcrun xcdevice list 2>/dev/null | jq -r --arg name "$search_term" "
+            .[] | $platform_filter |
+            select(.name | test(\$name; \"i\")) |
+            \"\(.operatingSystemVersion)\t\(.identifier)\"
+        " 2>/dev/null | while IFS=$'\t' read -r version id; do
+            ios_ver=$(echo "$version" | sed -E 's/([0-9]+\.[0-9]+).*/\1/')
+            if version_gte "$ios_ver" "$min_ios"; then
+                echo "$id"
+            fi
+        done | head -1
+    fi
+}
+
+# Find provisioning profile for the app
+get_profile() {
+    local bundle_id="sh.blink.blinkshell"
+    local profiles_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
+
+    if [ ! -d "$profiles_dir" ]; then
+        return 1
+    fi
+
+    # Find a valid provisioning profile for our bundle ID
+    for profile in "$profiles_dir"/*.mobileprovision; do
+        [ -f "$profile" ] || continue
+
+        # Extract and check bundle ID from profile
+        local profile_bundle_id
+        profile_bundle_id=$(security cms -D -i "$profile" 2>/dev/null | \
+            plutil -extract Entitlements.application-identifier raw - 2>/dev/null | \
+            sed 's/^[A-Z0-9]*\.//')
+
+        # Check for exact match or wildcard
+        if [ "$profile_bundle_id" = "$bundle_id" ] || [ "$profile_bundle_id" = "*" ]; then
+            # Check if profile is not expired
+            local expiry
+            expiry=$(security cms -D -i "$profile" 2>/dev/null | \
+                plutil -extract ExpirationDate raw - 2>/dev/null)
+
+            if [ -n "$expiry" ]; then
+                local expiry_epoch current_epoch
+                expiry_epoch=$(date -jf "%Y-%m-%dT%H:%M:%SZ" "$expiry" "+%s" 2>/dev/null || echo "0")
+                current_epoch=$(date "+%s")
+
+                if [ "$expiry_epoch" -gt "$current_epoch" ]; then
+                    echo "$profile"
+                    return 0
+                fi
+            fi
+        fi
+    done
+
+    return 1
+}
+
+# Verify provisioning profile exists for signed builds
+verify_provisioning_profile() {
+    echo "Checking for valid provisioning profile..."
+
+    local profile
+    profile=$(get_profile)
+
+    if [ -z "$profile" ]; then
+        echo ""
+        echo "Error: No valid provisioning profile found for sh.blink.blinkshell"
+        echo ""
+        echo "To create a provisioning profile:"
+        echo "1. Open Xcode and go to Settings > Accounts"
+        echo "2. Select your Apple ID and click 'Download Manual Profiles'"
+        echo "3. Or open the project in Xcode and let it manage signing automatically"
+        echo ""
+        echo "For signed IPA builds, you need an Apple Developer account."
+        return 1
+    fi
+
+    echo "  Found: $(basename "$profile")"
+    return 0
 }
 
 # Function to fix package dependencies
@@ -180,6 +434,17 @@ fix_package_dependencies() {
     rm -rf "${SOURCE_DIR}/Blink.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved" 2>/dev/null || true
 }
 
+# Function to fix hardcoded TEAM_ID in project file
+fix_team_id() {
+    local PROJECT_FILE="${PROJECT}/project.pbxproj"
+    local HARDCODED_TEAM="A2H2CL32AG"
+
+    if grep -q "$HARDCODED_TEAM" "$PROJECT_FILE" 2>/dev/null; then
+        echo "Fixing hardcoded TEAM_ID in project..."
+        sed -i '' "s/${HARDCODED_TEAM}/\${TEAM_ID}/g" "$PROJECT_FILE"
+        echo "  Replaced $HARDCODED_TEAM with \${TEAM_ID}"
+    fi
+}
 
 # Function to remove paywall (GPL sideload build)
 patch_remove_paywall() {
@@ -563,21 +828,11 @@ ENTITLEMENTS_EOF
 # Function to setup/clone repository
 setup_repository() {
     if [ -d "$SOURCE_DIR" ]; then
-        echo "Source directory already exists."
-        if [ "$NON_INTERACTIVE" = true ]; then
-            echo "Non-interactive mode: using existing source directory."
-        else
-            read -p "Do you want to clean and re-clone? (y/N) " -n 1 -r
-            echo
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                echo "Removing existing source directory..."
-                rm -rf "$SOURCE_DIR"
-            else
-                echo "Using existing source directory..."
-            fi
-        fi
-
-        if [ -d "$SOURCE_DIR" ]; then
+        if [ "$SOURCE_OVERWRITE" = true ]; then
+            echo "Removing existing source directory (--overwrite)..."
+            rm -rf "$SOURCE_DIR"
+        elif [ "$SOURCE_UPDATE" = true ]; then
+            echo "Updating existing source directory (--update)..."
             cd "$SOURCE_DIR"
 
             echo "Fetching latest changes..."
@@ -598,6 +853,21 @@ setup_repository() {
             rm -rf Blink.xcodeproj/project.xcworkspace/xcshareddata/
 
             fix_package_dependencies
+            fix_team_id
+            patch_remove_paywall
+            patch_skip_migrator
+            patch_fileprovider_sideload
+            create_sideload_entitlements
+            return 0
+        else
+            # Default: reuse existing source silently
+            echo "Using existing source directory..."
+            echo "  (Use --update to fetch latest, --overwrite to re-clone)"
+            cd "$SOURCE_DIR"
+
+            # Still apply patches in case they haven't been applied
+            fix_package_dependencies
+            fix_team_id
             patch_remove_paywall
             patch_skip_migrator
             patch_fileprovider_sideload
@@ -627,6 +897,7 @@ setup_repository() {
     rm -rf Blink.xcodeproj/project.xcworkspace/xcshareddata/
 
     fix_package_dependencies
+    fix_team_id
     patch_remove_paywall
     patch_skip_migrator
     patch_fileprovider_sideload
@@ -643,12 +914,15 @@ resolve_packages() {
         2>&1 | grep -E "(Resolved|Fetching|Checking out|error:|warning:)" || true
 }
 
-# Function to run xcodebuild with optional xcpretty
+# Function to run xcodebuild with optional xcpretty and logging
 run_xcodebuild() {
+    mkdir -p "$(dirname "$BUILD_LOG")"
+    echo "Build log: $BUILD_LOG"
+
     if command -v xcpretty &> /dev/null; then
-        "$@" 2>&1 | xcpretty
+        "$@" 2>&1 | tee "$BUILD_LOG" | xcpretty
     else
-        "$@"
+        "$@" 2>&1 | tee "$BUILD_LOG"
     fi
 }
 
@@ -672,12 +946,27 @@ build_app() {
         # Build and run in iOS Simulator
         echo "Building for iOS Simulator..."
 
-        # Boot simulator if needed
-        SIMULATOR_ID=$(xcrun simctl list devices available | grep -E "iPhone (15|16)" | head -1 | sed -E 's/.*\(([A-F0-9-]+)\).*/\1/')
+        local SIMULATOR_ID=""
 
-        if [ -z "$SIMULATOR_ID" ]; then
-            echo "No suitable iPhone simulator found. Creating one..."
-            SIMULATOR_ID=$(xcrun simctl create "iPhone 15" "com.apple.CoreSimulator.SimDeviceType.iPhone-15")
+        # Check if a specific simulator was requested
+        if [ -n "$TARGET_SIMULATOR" ]; then
+            SIMULATOR_ID=$(device_search "$TARGET_SIMULATOR" "simulator")
+            if [ -z "$SIMULATOR_ID" ]; then
+                echo "Error: Could not find simulator matching '$TARGET_SIMULATOR'"
+                echo ""
+                echo "Available simulators:"
+                list_simulators
+                exit 1
+            fi
+            echo "Found simulator: $SIMULATOR_ID"
+        else
+            # Auto-select a simulator
+            SIMULATOR_ID=$(xcrun simctl list devices available | grep -E "iPhone (15|16)" | head -1 | sed -E 's/.*\(([A-F0-9-]+)\).*/\1/')
+
+            if [ -z "$SIMULATOR_ID" ]; then
+                echo "No suitable iPhone simulator found. Creating one..."
+                SIMULATOR_ID=$(xcrun simctl create "iPhone 15" "com.apple.CoreSimulator.SimDeviceType.iPhone-15")
+            fi
         fi
 
         echo "Using simulator: $SIMULATOR_ID"
@@ -712,12 +1001,34 @@ build_app() {
         # Build and install to connected device
         echo "Building and installing to connected device..."
 
-        # Get connected device ID
-        DEVICE_ID=$(xcrun xctrace list devices 2>&1 | grep -E "iPhone|iPad" | head -1 | sed -E 's/.*\(([A-F0-9-]+)\).*/\1/')
-
-        if [ -z "$DEVICE_ID" ]; then
-            echo "Error: No iOS device connected. Please connect a device and try again."
+        # Verify provisioning profile before building
+        if ! verify_provisioning_profile; then
             exit 1
+        fi
+
+        local DEVICE_ID=""
+
+        # Check if a specific device was requested
+        if [ -n "$TARGET_DEVICE" ]; then
+            DEVICE_ID=$(device_search "$TARGET_DEVICE" "device")
+            if [ -z "$DEVICE_ID" ]; then
+                echo "Error: Could not find device matching '$TARGET_DEVICE'"
+                echo ""
+                echo "Available devices:"
+                list_devices
+                exit 1
+            fi
+            echo "Found device: $DEVICE_ID"
+        else
+            # Auto-select a device
+            DEVICE_ID=$(xcrun xctrace list devices 2>&1 | grep -E "iPhone|iPad" | head -1 | sed -E 's/.*\(([A-F0-9-]+)\).*/\1/')
+
+            if [ -z "$DEVICE_ID" ]; then
+                echo "Error: No iOS device connected. Please connect a device and try again."
+                echo ""
+                echo "Use --devices to list available devices."
+                exit 1
+            fi
         fi
 
         echo "Installing to device: $DEVICE_ID"
@@ -732,6 +1043,11 @@ build_app() {
             $EXTRA_FLAGS
     elif [ "$DO_ARCHIVE" = true ]; then
         # Build archive
+        # Verify provisioning profile before building
+        if ! verify_provisioning_profile; then
+            exit 1
+        fi
+
         ARCHIVE_PATH="${BUILD_DIR}/Blink.xcarchive"
         echo "Creating archive at: $ARCHIVE_PATH"
 
@@ -756,6 +1072,70 @@ build_app() {
 
         echo ""
         echo "Archive created: $OUTPUT_ARCHIVE_PATH"
+    elif [ "$DO_SIGNED_IPA" = true ]; then
+        # Build signed IPA (requires developer account)
+        # Verify provisioning profile before building
+        if ! verify_provisioning_profile; then
+            exit 1
+        fi
+
+        ARCHIVE_PATH="${BUILD_DIR}/Blink.xcarchive"
+        echo "Creating signed archive..."
+
+        run_xcodebuild xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "${BUILD_DIR}/DerivedData" \
+            -archivePath "$ARCHIVE_PATH" \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            archive
+
+        echo ""
+        echo "Exporting signed IPA..."
+
+        # Create export options plist
+        EXPORT_OPTIONS="${BUILD_DIR}/ExportOptions.plist"
+        cat > "$EXPORT_OPTIONS" << 'EXPORT_EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>development</string>
+    <key>signingStyle</key>
+    <string>automatic</string>
+    <key>stripSwiftSymbols</key>
+    <true/>
+    <key>compileBitcode</key>
+    <false/>
+</dict>
+</plist>
+EXPORT_EOF
+
+        EXPORT_PATH="${BUILD_DIR}/Export"
+        xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$EXPORT_PATH" \
+            -exportOptionsPlist "$EXPORT_OPTIONS"
+
+        # Find the exported IPA
+        EXPORTED_IPA=$(find "$EXPORT_PATH" -name "*.ipa" | head -1)
+        if [ -n "$EXPORTED_IPA" ]; then
+            mkdir -p "$OUTPUT_DIR"
+            OUTPUT_IPA_PATH="${OUTPUT_DIR}/Blink-signed-${VERSION}.ipa"
+            if [ "$KEEP_BUILD" = true ]; then
+                cp -f "$EXPORTED_IPA" "$OUTPUT_IPA_PATH"
+            else
+                mv "$EXPORTED_IPA" "$OUTPUT_IPA_PATH"
+            fi
+            echo "Created: $OUTPUT_IPA_PATH"
+        else
+            echo "Error: Export failed - IPA not found"
+            exit 1
+        fi
     else
         # Generic iOS build (unsigned .ipa for sideloading)
         # Use sideload-friendly entitlements (no iCloud, Push, etc.)
@@ -821,6 +1201,18 @@ build_app() {
 
 # Main execution
 preflight_checks
+
+# Handle device/simulator listing (no source setup needed)
+if [ "$DO_LIST_DEVICES" = true ]; then
+    list_devices
+    exit 0
+fi
+
+if [ "$DO_LIST_SIMULATORS" = true ]; then
+    list_simulators
+    exit 0
+fi
+
 setup_repository
 
 if [ "$SETUP_ONLY" = true ]; then
@@ -843,7 +1235,7 @@ fi
 
 resolve_packages
 
-if [ "$DO_BUILD" = true ] || [ "$DO_INSTALL" = true ] || [ "$DO_ARCHIVE" = true ] || [ "$DO_SIMULATOR" = true ]; then
+if [ "$DO_BUILD" = true ] || [ "$DO_INSTALL" = true ] || [ "$DO_ARCHIVE" = true ] || [ "$DO_SIMULATOR" = true ] || [ "$DO_SIGNED_IPA" = true ]; then
     build_app
     if [ "$KEEP_BUILD" = false ]; then
         echo ""
@@ -868,6 +1260,10 @@ elif [ "$DO_INSTALL" = true ]; then
     echo "App has been installed to your device."
 elif [ "$DO_ARCHIVE" = true ]; then
     echo "Archive location: ${OUTPUT_ARCHIVE_PATH}"
+elif [ "$DO_SIGNED_IPA" = true ]; then
+    echo "Signed IPA: ${OUTPUT_IPA_PATH}"
+    echo ""
+    echo "This IPA can be installed directly via Xcode, Apple Configurator, or similar tools."
 else
     echo "Unsigned IPA: ${OUTPUT_IPA_PATH}"
     echo ""
