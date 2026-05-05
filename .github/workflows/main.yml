@@ -7,32 +7,28 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: 'recursive' # This ensures we get the "engine" code
 
       - name: Setup Dependencies
         run: |
-          for tool in jq automake autoconf libtool pkg-config; do
-            if ! command -v $tool &> /dev/null; then
-              brew install $tool || true
-            fi
-          done
+          brew install jq automake autoconf libtool pkg-config
 
-      - name: Fix Script Logic
+      - name: Surgical Syntax Fix
         run: |
-          # Disable the problematic functions that were corrupting the project
-          sed -i '' 's/fix_package_dependencies() {/fix_package_dependencies() { return 0;/g' build-blink-shell-gpl.sh
-          sed -i '' 's/fix_team_id() {/fix_team_id() { return 0;/g' build-blink-shell-gpl.sh
-          
-          # Disable SideloadFix injection to prevent "Bad file descriptor" in LiveContainer
-          sed -i '' 's/inject_sideload_fix /# inject_sideload_fix /g' build-blink-shell-gpl.sh
+          # Instead of returning 0, we fix the "unexpected }" error 
+          # by adding a ':' (do nothing) inside any empty blocks.
+          sed -i '' 's/fix_package_dependencies() {/fix_package_dependencies() { :/g' build-blink-shell-gpl.sh
+          sed -i '' 's/fix_team_id() {/fix_team_id() { :/g' build-blink-shell-gpl.sh
 
       - name: Build IPA
         run: |
           chmod +x build-blink-shell-gpl.sh
-          # Using --clean to ensure everything is built from scratch
-          ./build-blink-shell-gpl.sh --build --clean --overwrite --version v18.6.0
+          # We remove the --clean flag to allow it to use the submodules we just checked out
+          ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-Clean-v18.6.0
+          name: Blink-Full-v18.6.0
           path: "dist/*.ipa"
