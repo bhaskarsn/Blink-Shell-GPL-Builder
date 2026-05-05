@@ -1,18 +1,16 @@
 name: Build Blink Shell
 on: [workflow_dispatch]
 
-jobs:
+[span_2](start_span)jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-14 # Uses a more stable macOS environment for compilation[span_2](end_span)
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Setup Dependencies
         run: |
-          # Only install if not already present to avoid exit code 1
+          # Use a loop to check for tools and avoid "already installed" errors
           for tool in jq automake autoconf libtool pkg-config; do
             if ! command -v $tool &> /dev/null; then
               brew install $tool || true
@@ -22,11 +20,11 @@ jobs:
       - name: Build IPA
         run: |
           chmod +x build-blink-shell-gpl.sh
-          # Added -e to see exactly where the script fails if it does
-          ./build-blink-shell-gpl.sh --build
+          # Explicitly specify version v18.[span_3](start_span)6.1 and use --overwrite to ensure a clean source[span_3](end_span)
+          ./build-blink-shell-gpl.sh --build --overwrite v18.6.1
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-Shell-IPA
-          path: "**/*.ipa"
+          name: Blink-Shell-v18.6.1-IPA
+          path: "dist/*.[span_4](start_span)ipa" # The builder script puts finished files in the dist/ folder[span_4](end_span)
