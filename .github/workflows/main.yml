@@ -19,8 +19,8 @@ jobs:
       - name: Build IPA
         run: |
           chmod +x build-blink-shell-gpl.sh
-          # Using "raw" branch ensures you get the latest iOS 26 compatibility fixes
-          ./build-blink-shell-gpl.sh --build --overwrite raw
+          # Passing 'raw' via the --version flag to avoid the 'Unknown option' error
+          ./build-blink-shell-gpl.sh --build --overwrite --version raw
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
