@@ -19,11 +19,18 @@ jobs:
       - name: Build IPA
         run: |
           chmod +x build-blink-shell-gpl.sh
-          # Passing 'raw' via the --version flag to avoid the 'Unknown option' error
-          ./build-blink-shell-gpl.sh --build --overwrite --version raw
+          # v18.6.0 is the confirmed stable tag for the current major release
+          ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
 
-      - name: Upload Artifact
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-Shell-Latest-IPA
+          name: Blink-Shell-v18.6.0-IPA
           path: "dist/*.ipa"
+          
+      - name: Debug Logs (If Failed)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Build-Log-File
+          path: "build-output/build.log"
