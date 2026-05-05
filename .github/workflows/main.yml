@@ -9,32 +9,38 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Dependencies
-        run: |
-          brew install jq automake autoconf libtool pkg-config
+        run: brew install jq automake autoconf libtool pkg-config
 
-      - name: Total Manual Setup
+      - name: Manual Clone & Structure Check
         run: |
-          # 1. Clone the REAL source code into a specific folder
-          git clone --recursive https://github.com/blinksh/blink.git blink-source
+          # 1. Clone into the EXACT folder the script usually expects
+          git clone --recursive https://github.com/blinksh/blink.git blink
           
-          # 2. Move the builder script INTO the source folder
-          cp build-blink-shell-gpl.sh blink-source/
-          
-          # 3. Enter the folder and fix the syntax error locally
-          cd blink-source
+          # 2. Fix the syntax error but keep the functions functional
           sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
           
-          # 4. RUN THE BUILD from inside the source folder
-          # This forces xcodebuild to see Blink.xcodeproj in the current directory
-          chmod +x build-blink-shell-gpl.sh
-          ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
-          
-          # 5. Move the finished IPA back to the root for uploading
-          mkdir -p ../dist
-          cp dist/*.ipa ../dist/ 2>/dev/null || cp *.ipa ../dist/ 2>/dev/null || true
+          # 3. Check the structure so we can see it in the logs
+          echo "Checking directory structure..."
+          ls -d blink/*.xcodeproj || echo "ERROR: Project file not found where expected!"
 
-      - name: Upload IPA
+      - name: Build IPA
+        run: |
+          chmod +x build-blink-shell-gpl.sh
+          # We run it with the blink folder already present
+          ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
+
+      - name: Upload IPA (On Success)
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-Final-v18.6.0
+          name: Blink-IPA-v18.6.0
           path: "dist/*.ipa"
+
+      - name: Upload Debug Logs (Always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Build-Debug-Logs
+          path: |
+            build-output/build.log
+            *.log
