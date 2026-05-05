@@ -16,21 +16,23 @@ jobs:
             fi
           done
 
-      - name: Patch the Patcher (Fix Syntax)
+      - name: Fix Script Logic
         run: |
-          # We tell the functions to exit immediately (return 0) 
-          # This prevents them from corrupting the project file.
+          # Disable the problematic functions that were corrupting the project
           sed -i '' 's/fix_package_dependencies() {/fix_package_dependencies() { return 0;/g' build-blink-shell-gpl.sh
           sed -i '' 's/fix_team_id() {/fix_team_id() { return 0;/g' build-blink-shell-gpl.sh
+          
+          # Disable SideloadFix injection to prevent "Bad file descriptor" in LiveContainer
+          sed -i '' 's/inject_sideload_fix /# inject_sideload_fix /g' build-blink-shell-gpl.sh
 
       - name: Build IPA
         run: |
           chmod +x build-blink-shell-gpl.sh
-          # Using the stable v18.6.0 tag
-          ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
+          # Using --clean to ensure everything is built from scratch
+          ./build-blink-shell-gpl.sh --build --clean --overwrite --version v18.6.0
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-Shell-v18.6.0-IPA
+          name: Blink-Clean-v18.6.0
           path: "dist/*.ipa"
