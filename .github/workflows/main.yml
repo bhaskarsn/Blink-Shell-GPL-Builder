@@ -1,0 +1,22 @@
+name: Build Blink Shell
+on: [workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Dependencies
+        run: brew install jq
+
+      - name: Build IPA
+        run: |
+          chmod +x build-blink-shell-gpl.sh
+          ./build-blink-shell-gpl.sh --build
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Blink-Shell-IPA
+          path: "*.ipa"
