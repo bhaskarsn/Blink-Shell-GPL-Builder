@@ -11,32 +11,49 @@ jobs:
       - name: Setup Dependencies
         run: brew install jq automake autoconf libtool pkg-config
 
-      - name: Manual Clone & Structure Check
+      - name: The Interceptor Build
         run: |
-          # 1. Clone into the EXACT folder the script usually expects
-          git clone --recursive https://github.com/blinksh/blink.git blink
+          # 1. Create a fake Xcode compiler to hijack the script's build command
+          cat << 'EOF' > fake_xcodebuild
+          #!/bin/bash
+          echo "========================================"
+          echo "🛡️ INTERCEPTOR ACTIVE: Healing Project DNA..."
+          echo "========================================"
           
-          # 2. Fix the syntax error but keep the functions functional
+          # Find the source folder and restore the corrupted project file
+          if [ -d "blink-src" ]; then
+              git -C blink-src checkout Blink.xcodeproj/project.pbxproj
+          elif [ -d "blink" ]; then
+              git -C blink checkout Blink.xcodeproj/project.pbxproj
+          fi
+          
+          echo "🧬 Project file restored to factory state. Launching real compiler..."
+          
+          # Pass control to the real Xcode compiler with all original arguments
+          /usr/bin/xcodebuild "$@"
+          EOF
+          
+          # 2. Make the interceptor executable
+          chmod +x fake_xcodebuild
+          
+          # 3. Patch the script to use our fake compiler instead of the real one
+          sed -i '' 's/\bxcodebuild\b/.\/fake_xcodebuild/g' build-blink-shell-gpl.sh
+          
+          # 4. Fix the bash syntax crash (the empty brackets issue from earlier)
           sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
           
-          # 3. Check the structure so we can see it in the logs
-          echo "Checking directory structure..."
-          ls -d blink/*.xcodeproj || echo "ERROR: Project file not found where expected!"
-
-      - name: Build IPA
-        run: |
+          # 5. Run the builder script!
           chmod +x build-blink-shell-gpl.sh
-          # We run it with the blink folder already present
           ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
 
-      - name: Upload IPA (On Success)
+      - name: Upload IPA
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-IPA-v18.6.0
+          name: Blink-Interceptor-v18.6.0
           path: "dist/*.ipa"
 
-      - name: Upload Debug Logs (Always)
+      - name: Upload Debug Logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
