@@ -16,10 +16,17 @@ jobs:
             fi
           done
 
+      - name: Patch the Patcher (Fix Corrupted Project)
+        run: |
+          # These two functions are currently corrupting the project file syntax.
+          # We will comment them out so the project remains valid.
+          sed -i '' 's/fix_package_dependencies/# fix_package_dependencies/g' build-blink-shell-gpl.sh
+          sed -i '' 's/fix_team_id/# fix_team_id/g' build-blink-shell-gpl.sh
+
       - name: Build IPA
         run: |
           chmod +x build-blink-shell-gpl.sh
-          # v18.6.0 is the confirmed stable tag for the current major release
+          # Using v18.6.0 as the confirmed stable target
           ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
 
       - name: Upload IPA
@@ -27,10 +34,3 @@ jobs:
         with:
           name: Blink-Shell-v18.6.0-IPA
           path: "dist/*.ipa"
-          
-      - name: Debug Logs (If Failed)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Build-Log-File
-          path: "build-output/build.log"
