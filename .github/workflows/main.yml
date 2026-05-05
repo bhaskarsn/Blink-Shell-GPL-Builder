@@ -5,30 +5,30 @@ jobs:
   build:
     runs-on: macos-14
     steps:
-      - name: Checkout
+      - name: Checkout Builder Script
         uses: actions/checkout@v4
 
       - name: Setup Dependencies
         run: |
           brew install jq automake autoconf libtool pkg-config
 
-      - name: Precision Syntax Repair
+      - name: Manual Source Retrieval
         run: |
-          # Fix the "unexpected }" by ensuring empty blocks have a ':'
-          # This keeps the cloning logic alive but stops the syntax crash
-          sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
+          # We clone the actual Blink source code into a folder named 'blink'
+          # This is the "DNA" that was missing in your 46MB build.
+          git clone --recursive https://github.com/blinksh/blink.git blink
           
-          # Force the script to use the correct version and skip the team ID check
-          sed -i '' 's/fix_team_id() {/fix_team_id() { :/g' build-blink-shell-gpl.sh
+          # Fix the syntax error in the builder script so it doesn't crash on the '}'
+          sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
 
       - name: Build IPA
         run: |
           chmod +x build-blink-shell-gpl.sh
-          # We use --build and --overwrite to ensure a fresh, full compilation
+          # We run the build. The script will find the 'blink' folder we just cloned.
           ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-Surgical-v18.6.0
+          name: Blink-Full-Manual-v18.6.0
           path: "dist/*.ipa"
