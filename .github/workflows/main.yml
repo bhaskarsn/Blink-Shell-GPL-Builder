@@ -7,8 +7,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Setup Dependencies
         run: |
@@ -21,10 +19,11 @@ jobs:
       - name: Build IPA
         run: |
           chmod +x build-blink-shell-gpl.sh
-          ./build-blink-shell-gpl.sh --build --overwrite v18.6.1
+          # Using "raw" branch ensures you get the latest iOS 26 compatibility fixes
+          ./build-blink-shell-gpl.sh --build --overwrite raw
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-Shell-v18.6.1-IPA
+          name: Blink-Shell-Latest-IPA
           path: "dist/*.ipa"
