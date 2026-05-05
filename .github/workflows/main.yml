@@ -3,12 +3,17 @@ on: [workflow_dispatch]
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-14 # Specifically use macOS 14 for better Xcode 15 support
     steps:
-      - uses: actions/checkout@v4
-      
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive # Ensures all Blink sub-parts are downloaded
+
       - name: Setup Dependencies
-        run: brew install jq
+        run: |
+          brew install jq || true
+          brew install automake autoconf libtool pkg-config || true
 
       - name: Build IPA
         run: |
@@ -19,4 +24,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Blink-Shell-IPA
-          path: "*.ipa"
+          path: "**/*.ipa" # Searches subfolders for the file
