@@ -5,30 +5,36 @@ jobs:
   build:
     runs-on: macos-14
     steps:
-      - name: Checkout Builder Script
+      - name: Checkout Builder
         uses: actions/checkout@v4
 
       - name: Setup Dependencies
         run: |
           brew install jq automake autoconf libtool pkg-config
 
-      - name: Manual Source Retrieval
+      - name: Total Manual Setup
         run: |
-          # We clone the actual Blink source code into a folder named 'blink'
-          # This is the "DNA" that was missing in your 46MB build.
-          git clone --recursive https://github.com/blinksh/blink.git blink
+          # 1. Clone the REAL source code into a specific folder
+          git clone --recursive https://github.com/blinksh/blink.git blink-source
           
-          # Fix the syntax error in the builder script so it doesn't crash on the '}'
+          # 2. Move the builder script INTO the source folder
+          cp build-blink-shell-gpl.sh blink-source/
+          
+          # 3. Enter the folder and fix the syntax error locally
+          cd blink-source
           sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
-
-      - name: Build IPA
-        run: |
+          
+          # 4. RUN THE BUILD from inside the source folder
+          # This forces xcodebuild to see Blink.xcodeproj in the current directory
           chmod +x build-blink-shell-gpl.sh
-          # We run the build. The script will find the 'blink' folder we just cloned.
           ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
+          
+          # 5. Move the finished IPA back to the root for uploading
+          mkdir -p ../dist
+          cp dist/*.ipa ../dist/ 2>/dev/null || cp *.ipa ../dist/ 2>/dev/null || true
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-Full-Manual-v18.6.0
+          name: Blink-Final-v18.6.0
           path: "dist/*.ipa"
