@@ -7,28 +7,28 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive' # This ensures we get the "engine" code
 
       - name: Setup Dependencies
         run: |
           brew install jq automake autoconf libtool pkg-config
 
-      - name: Surgical Syntax Fix
+      - name: Precision Syntax Repair
         run: |
-          # Instead of returning 0, we fix the "unexpected }" error 
-          # by adding a ':' (do nothing) inside any empty blocks.
-          sed -i '' 's/fix_package_dependencies() {/fix_package_dependencies() { :/g' build-blink-shell-gpl.sh
+          # Fix the "unexpected }" by ensuring empty blocks have a ':'
+          # This keeps the cloning logic alive but stops the syntax crash
+          sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
+          
+          # Force the script to use the correct version and skip the team ID check
           sed -i '' 's/fix_team_id() {/fix_team_id() { :/g' build-blink-shell-gpl.sh
 
       - name: Build IPA
         run: |
           chmod +x build-blink-shell-gpl.sh
-          # We remove the --clean flag to allow it to use the submodules we just checked out
+          # We use --build and --overwrite to ensure a fresh, full compilation
           ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-Full-v18.6.0
+          name: Blink-Surgical-v18.6.0
           path: "dist/*.ipa"
