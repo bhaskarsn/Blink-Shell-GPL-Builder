@@ -3,25 +3,30 @@ on: [workflow_dispatch]
 
 jobs:
   build:
-    runs-on: macos-14 # Specifically use macOS 14 for better Xcode 15 support
+    runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: recursive # Ensures all Blink sub-parts are downloaded
+          submodules: recursive
 
       - name: Setup Dependencies
         run: |
-          brew install jq || true
-          brew install automake autoconf libtool pkg-config || true
+          # Only install if not already present to avoid exit code 1
+          for tool in jq automake autoconf libtool pkg-config; do
+            if ! command -v $tool &> /dev/null; then
+              brew install $tool || true
+            fi
+          done
 
       - name: Build IPA
         run: |
           chmod +x build-blink-shell-gpl.sh
+          # Added -e to see exactly where the script fails if it does
           ./build-blink-shell-gpl.sh --build
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Blink-Shell-IPA
-          path: "**/*.ipa" # Searches subfolders for the file
+          path: "**/*.ipa"
