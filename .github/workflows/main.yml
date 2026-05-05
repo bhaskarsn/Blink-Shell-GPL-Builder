@@ -11,46 +11,58 @@ jobs:
       - name: Setup Dependencies
         run: brew install jq automake autoconf libtool pkg-config
 
-      - name: The Interceptor Build
+      - name: Run Builder (Setup & Patch Phase)
+        # We EXPECT this to fail at the Xcode phase, but it will successfully 
+        # download the code and patch the paywall first.
+        continue-on-error: true 
         run: |
-          # 1. Create a fake Xcode compiler to hijack the script's build command
-          cat << 'EOF' > fake_xcodebuild
-          #!/bin/bash
-          echo "========================================"
-          echo "🛡️ INTERCEPTOR ACTIVE: Healing Project DNA..."
-          echo "========================================"
-          
-          # Find the source folder and restore the corrupted project file
-          if [ -d "blink-src" ]; then
-              git -C blink-src checkout Blink.xcodeproj/project.pbxproj
-          elif [ -d "blink" ]; then
-              git -C blink checkout Blink.xcodeproj/project.pbxproj
-          fi
-          
-          echo "🧬 Project file restored to factory state. Launching real compiler..."
-          
-          # Pass control to the real Xcode compiler with all original arguments
-          /usr/bin/xcodebuild "$@"
-          EOF
-          
-          # 2. Make the interceptor executable
-          chmod +x fake_xcodebuild
-          
-          # 3. Patch the script to use our fake compiler instead of the real one
-          sed -i '' 's/\bxcodebuild\b/.\/fake_xcodebuild/g' build-blink-shell-gpl.sh
-          
-          # 4. Fix the bash syntax crash (the empty brackets issue from earlier)
           sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
-          
-          # 5. Run the builder script!
           chmod +x build-blink-shell-gpl.sh
           ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
 
-      - name: Upload IPA
-        if: success()
+      - name: Heal Project DNA
+        run: |
+          echo "Restoring corrupted project file to factory state..."
+          cd blink-src
+          git checkout Blink.xcodeproj/project.pbxproj
+          echo "DNA Healed. Extensions restored."
+
+      - name: Manual Xcode Compilation
+        run: |
+          echo "Running pure Xcode compilation bypassing the broken script..."
+          # This is the EXACT command from your log, but running on the healed file
+          xcodebuild -project blink-src/Blink.xcodeproj \
+            -scheme Blink \
+            -configuration Release \
+            -destination generic/platform=iOS \
+            -derivedDataPath build-output/DerivedData \
+            CONFIGURATION_BUILD_DIR=$PWD/build-output/Products \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_ENTITLEMENTS=$PWD/blink-src/Blink/Blink-sideload.entitlements \
+            DEAD_CODE_STRIPPING=NO \
+            ENABLE_PREVIEWS=NO \
+            build
+
+      - name: Package IPA Manually
+        run: |
+          echo "Packaging IPA for LiveContainer..."
+          mkdir -p Payload
+          # Grab the compiled binary directly from the output folder
+          cp -R build-output/Products/Blink.app Payload/
+          
+          mkdir -p dist
+          # Zip it up exactly how LiveContainer expects
+          zip -qr dist/Blink-LiveContainer-v18.6.0.ipa Payload
+          echo "Packaging complete!"
+
+      - name: Upload Final IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-Interceptor-v18.6.0
+          name: Blink-LiveContainer-v18.6.0
           path: "dist/*.ipa"
 
       - name: Upload Debug Logs
@@ -58,6 +70,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Build-Debug-Logs
-          path: |
-            build-output/build.log
-            *.log
+          path: build-output/build.log
