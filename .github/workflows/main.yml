@@ -52,14 +52,29 @@ jobs:
         working-directory: blink-src
         run: |
           cat > developer_setup.xcconfig << 'XCCONFIG'
-          // Minimal developer setup for unsigned CI build
           DEVELOPMENT_TEAM =
           CODE_SIGN_IDENTITY =
           CODE_SIGNING_REQUIRED = NO
           CODE_SIGNING_ALLOWED = NO
           XCCONFIG
-          echo "Created developer_setup.xcconfig"
-          cat developer_setup.xcconfig
+
+      - name: Patch entitlements (remove iCloud, push, keychain)
+        working-directory: blink-src
+        run: |
+          # Find and patch all entitlements files
+          find . -name "*.entitlements" | while read f; do
+            echo "Patching: $f"
+            # Remove iCloud, push notifications, keychain sharing
+            /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.icloud-services" "$f" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.icloud-container-identifiers" "$f" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.ubiquity-kvstore-identifier" "$f" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.ubiquity-container-identifiers" "$f" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Delete :aps-environment" "$f" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Delete :com.apple.security.application-groups" "$f" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Delete :keychain-access-groups" "$f" 2>/dev/null || true
+            echo "Done: $f"
+            cat "$f"
+          done
 
       - name: Remove shared data (avoids signing conflicts)
         working-directory: blink-src
@@ -97,7 +112,7 @@ jobs:
         if: always()
         run: |
           if [ "${BUILD_EXIT}" != "0" ]; then
-            echo "Build failed with exit code ${BUILD_EXIT}. Check build-log artifact."
+            echo "Build failed. Check build-log artifact."
             exit 1
           fi
 
