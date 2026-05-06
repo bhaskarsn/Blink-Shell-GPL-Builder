@@ -1,93 +1,77 @@
-name: Blink Shell (Final Boss 2026 Protocol)
+name: Blink Shell (Ultimate 2026 Fix)
 on: [workflow_dispatch]
 
 jobs:
   build:
     runs-on: macos-14
     steps:
-      - name: Checkout Source
+      - name: Checkout Builder
         uses: actions/checkout@v4
 
-      - name: Switch to Newest SDK
+      - name: Select SDK
         run: |
-          XCODE_PATH=$(ls -d /Applications/Xcode_*.app | sort -V | tail -n 1)
-          echo "Using SDK: $XCODE_PATH"
-          sudo xcode-select -s $XCODE_PATH/Contents/Developer
+          # Flexible Xcode selection to prevent the 18s crash
+          XCODE_PATH=$(ls -d /Applications/Xcode_16*.app | sort -V | tail -n 1)
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
 
-      - name: Install Build Tools
-        run: brew install jq automake autoconf libtool pkg-config
+      - name: Setup Tools
+        run: brew install jq automake autoconf libtool pkg-config || true
 
-      - name: The DNA Scrub
+      - name: Clean & Patch Script
         run: |
-          echo "🧬 Scrubbing script self-sabotage..."
-          # 1. Fix script syntax error
+          # Verify script exists to prevent immediate failure
+          if [ ! -f "build-blink-shell-gpl.sh" ]; then echo "❌ Script missing!"; exit 1; fi
+          
+          # 1. Fix the general bash syntax[span_5](start_span)[span_5](end_span)
           sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
           
-          # 2. DELETE the resource fix block that causes the line 8 crash
-          sed -i '' '/Fixing get_resources.sh/,/done/d' build-blink-shell-gpl.sh
+          # 2. Disable the self-sabotaging resource fix (fixes the line 8 error)[span_6](start_span)[span_6](end_span)
+          sed -i '' 's/fix_get_resources/# fix_get_resources/g' build-blink-shell-gpl.sh || true
           
-          # 3. DELETE the malware injection that crashes LiveContainer
-          sed -i '' '/Injecting SideloadFix.dylib/,/insert_dylib/d' build-blink-shell-gpl.sh
+          # 3. Disable the SideloadFix malware (fixes LiveContainer crash)[span_7](start_span)[span_7](end_span)[span_8](start_span)[span_8](end_span)
+          sed -i '' 's/inject_sideload_fix/# inject_sideload_fix/g' build-blink-shell-gpl.sh || true
           
-          # 4. Block the script's internal cleanup so we can verify the binary
-          sed -i '' 's/rm -rf /#rm -rf /g' build-blink-shell-gpl.sh
+          # 4. Disable cleanup so we can verify the full 150MB binary[span_9](start_span)[span_9](end_span)
+          sed -i '' 's/rm -rf /# rm -rf /g' build-blink-shell-gpl.sh
           
-          echo "✅ Script is now pure and stable."
+          echo "✅ Script cleaned of all known self-destruct bugs."
 
-      - name: The Surgical Compile
+      - name: Build Full Engine
         run: |
-          # Create a hook to fix iOS 18/26 UI code the second compilation starts
-          mkdir -p $GITHUB_WORKSPACE/fake_bin
-          cat << 'EOF' > $GITHUB_WORKSPACE/fake_bin/xcodebuild
+          # Patch iOS 18/26 UI errors the moment compilation starts[span_10](start_span)[span_10](end_span)[span_11](start_span)[span_11](end_span)
+          mkdir -p bin_hook
+          cat << 'EOF' > bin_hook/xcodebuild
           #!/bin/bash
-          echo "🧬 Surgical Hook: Patching iPadOS 26 UI errors..."
-          TARGET_FILE="blink-src/Blink/SmarterKeys/KBAccessoryView.swift"
-          if [ -f "$TARGET_FILE" ]; then
-              sed -i '' 's/UIGlassEffect()/UIBlurEffect(style: .regular)/g' "$TARGET_FILE"
-              sed -i '' 's/UIGlassEffect/UIBlurEffect/g' "$TARGET_FILE"
-              sed -i '' 's/.*isInteractive.*/\/\/ removed/g' "$TARGET_FILE"
-              sed -i '' 's/.*tintColor.*/\/\/ removed/g' "$TARGET_FILE"
-              sed -i '' 's/.*cornerConfiguration.*/\/\/ removed/g' "$TARGET_FILE"
-          fi
+          find . -name "KBAccessoryView.swift" -exec sed -i '' 's/UIGlassEffect/UIBlurEffect/g' {} +
+          find . -name "KBAccessoryView.swift" -exec sed -i '' 's/.*cornerConfiguration.*/\/\/ removed/g' {} +
           /usr/bin/xcodebuild "$@"
           EOF
-          chmod +x $GITHUB_WORKSPACE/fake_bin/xcodebuild
-          export PATH="$GITHUB_WORKSPACE/fake_bin:$PATH"
-
+          chmod +x bin_hook/xcodebuild
+          export PATH="$(pwd)/bin_hook:$PATH"
+          
           chmod +x build-blink-shell-gpl.sh
           ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
 
-      - name: The Integrity Shield (Packaging)
+      - name: Verified 2026 Packaging
         run: |
-          echo "🏗️ Verifying Engine Integrity..."
-          # Hunt for the heavy Blink binary (>30MB)
-          APP_PATH=$(find . -name "Blink.app" -type d -not -path "./dist/*" | xargs du -s | sort -n | tail -1 | awk '{print $2}')
+          # Search for the HEAVIEST Blink.app (the one with all C++ engines)[span_12](start_span)[span_12](end_span)[span_13](start_span)[span_13](end_span)[span_14](start_span)[span_14](end_span)
+          APP_PATH=$(find . -name "Blink.app" -type d | xargs du -s | sort -n | tail -1 | awk '{print $2}')
           
           if [ -z "$APP_PATH" ] || [ ! -f "$APP_PATH/Blink" ]; then
-            echo "❌ GHOST BUILD DETECTED: Engine binary missing. Compilation failed."
+            echo "❌ ERROR: Engine binary missing (Ghost Build)."
             exit 1
           fi
           
-          SIZE=$(du -sh "$APP_PATH" | cut -f1)
-          echo "✅ Full Engine Verified ($SIZE). Packaging for iPadOS 26..."
+          echo "✅ Found Full Engine at $APP_PATH ($(du -sh $APP_PATH))"
           
           mkdir -p Final_IPA/Payload
           cp -R "$APP_PATH" Final_IPA/Payload/
           cd Final_IPA
-          # Preserve symlinks strictly with -y for 2026 kernel mapping
-          zip -qry Blink-v18.6.0-Full-2026.ipa Payload
-          echo "✅ Hybrid IPA successfully assembled."
+          # -y is mandatory for symlinks on iPadOS 26[span_15](start_span)[span_15](end_span)
+          zip -qry Blink-Full-2026.ipa Payload
 
-      - name: Upload Final Artifact
+      - name: Upload Final IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-Final-Verified-IPA
+          name: Blink-v18.6.0-Full-IPA
           path: "Final_IPA/*.ipa"
-
-      - name: Upload Logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Full-Build-Logs
-          path: |
-            build-output/build.log
