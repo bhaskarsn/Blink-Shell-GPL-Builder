@@ -112,24 +112,64 @@ jobs:
             exit 1
           fi
 
-      - name: Package IPA (proper structure)
+      - name: Create self-signed certificate and sign IPA
         run: |
           APP_PATH=$(find ./build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
           echo "Found .app at: $APP_PATH"
 
-          # Remove app extensions - they cause 'invalid format' in SideStore
-          # and crash on launch without proper provisioning
+          # Remove extensions and watch app
           rm -rf "$APP_PATH/PlugIns"
-          echo "Removed PlugIns (extensions)"
-
-          # Remove watch app if present
           rm -rf "$APP_PATH/Watch"
 
-          # Proper IPA structure: must be Payload/AppName.app
+          # Create a self-signed certificate for ad-hoc signing
+          cat > cert.conf << 'CERTCONF'
+          [ req ]
+          default_bits        = 2048
+          prompt              = no
+          default_md          = sha256
+          distinguished_name  = dn
+          [ dn ]
+          CN = iPhone Developer
+          CERTCONF
+
+          # Generate key and self-signed cert
+          openssl req -newkey rsa:2048 -nodes -keyout key.pem -x509 -days 365 -out cert.pem -config cert.conf
+
+          # Create a keychain and import the cert
+          security create-keychain -p "build" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "build" build.keychain
+          security import cert.pem -k build.keychain -T /usr/bin/codesign 2>/dev/null || true
+          security import key.pem -k build.keychain -T /usr/bin/codesign 2>/dev/null || true
+          security set-key-partition-list -S apple-tool:,apple: -s -k "build" build.keychain 2>/dev/null || true
+
+          # Create minimal entitlements
+          cat > entitlements.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>application-identifier</key>
+              <string>TEAM.sh.blink.blinkshell</string>
+              <key>get-task-allow</key>
+              <false/>
+          </dict>
+          </plist>
+          PLIST
+
+          # Sign all frameworks first
+          find "$APP_PATH/Frameworks" -name "*.framework" -o -name "*.dylib" 2>/dev/null | while read fw; do
+            codesign --force --sign - "$fw" 2>/dev/null || true
+          done
+
+          # Sign the main app with ad-hoc signature (-)
+          codesign --force --deep --sign - --entitlements entitlements.plist "$APP_PATH"
+          echo "Signed with ad-hoc signature"
+
+          # Package IPA
           rm -rf ipabuild
           mkdir -p ipabuild/Payload
           cp -r "$APP_PATH" ipabuild/Payload/
-
           cd ipabuild
           zip -r ../Blink.ipa Payload --symlinks
           cd ..
@@ -138,6 +178,6 @@ jobs:
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-unsigned
+          name: Blink-sidestore-ready
           path: Blink.ipa
           retention-days: 7
