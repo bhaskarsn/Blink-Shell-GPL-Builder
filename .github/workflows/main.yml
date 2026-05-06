@@ -11,38 +11,33 @@ jobs:
       - name: Setup Dependencies
         run: brew install jq automake autoconf libtool pkg-config
 
-      - name: The Interceptor Build
+      - name: The Shield Build (PATH Override)
         run: |
-          # 1. Create the Interceptor script to hijack the compiler
-          cat << 'EOF' > fake_xcodebuild
+          echo "Setting up Systemless Shield..."
+          mkdir -p $GITHUB_WORKSPACE/fake_bin
+          
+          # 1. Create our "Fake sed" interceptor
+          cat << 'EOF' > $GITHUB_WORKSPACE/fake_bin/sed
           #!/bin/bash
-          echo "========================================"
-          echo "🛡️ INTERCEPTOR ACTIVE: Healing Project DNA..."
-          echo "========================================"
-          
-          # The script broke the file. We heal it right before Xcode opens it.
-          if [ -d "blink-src" ]; then
-              git -C blink-src checkout Blink.xcodeproj/project.pbxproj
-          elif [ -d "blink" ]; then
-              git -C blink checkout Blink.xcodeproj/project.pbxproj
+          # If the script tries to edit the project file, we block it and pretend it succeeded.
+          if [[ "$*" == *"project.pbxproj"* ]]; then
+              echo "🛡️ SHIELD: Blocked destructive sed command on project.pbxproj!"
+              exit 0 
           fi
-          
-          echo "🧬 Project file restored. Launching real compiler..."
-          
-          # Pass control to the real Xcode compiler with all original arguments
-          /usr/bin/xcodebuild "$@"
+          # For all other commands (like bypassing the paywall), run the real macOS sed.
+          /usr/bin/sed "$@"
           EOF
           
-          # Make the interceptor executable
-          chmod +x fake_xcodebuild
+          # Make our fake sed executable
+          chmod +x $GITHUB_WORKSPACE/fake_bin/sed
           
-          # 2. Swap out the word 'xcodebuild' in the script with our interceptor
-          sed -i '' 's/\bxcodebuild\b/.\/fake_xcodebuild/g' build-blink-shell-gpl.sh
+          # 2. Put our shield at the very front of the system PATH
+          export PATH="$GITHUB_WORKSPACE/fake_bin:$PATH"
           
-          # 3. Fix the empty function crash (the original syntax error)
-          sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
+          # 3. Use the REAL sed one time to fix the bash syntax "()" crash
+          /usr/bin/sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
           
-          # 4. Run the builder script
+          # 4. Launch the builder script!
           chmod +x build-blink-shell-gpl.sh
           ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
 
