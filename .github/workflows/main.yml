@@ -10,7 +10,6 @@ jobs:
 
       - name: Switch to Latest Xcode 16
         run: |
-          # Dynamically find the highest version of Xcode 16 currently on the server
           XCODE_PATH=$(ls -d /Applications/Xcode_16*.app | sort -V | tail -n 1)
           echo "Found Xcode at: $XCODE_PATH"
           sudo xcode-select -s $XCODE_PATH/Contents/Developer
@@ -18,36 +17,52 @@ jobs:
       - name: Setup Dependencies
         run: brew install jq automake autoconf libtool pkg-config
 
-      - name: The Upgraded Shield & Build Phase
+      - name: The Upgraded Shield & Surgical Patch
         run: |
           echo "Setting up Upgraded Systemless Shield..."
           mkdir -p $GITHUB_WORKSPACE/fake_bin
           
-          # 🛡️ INTERCEPTOR: Block edits to the project file AND the resources script
+          # 🛡️ INTERCEPTOR 1: Block destructive file edits from the main script
           cat << 'EOF' > $GITHUB_WORKSPACE/fake_bin/sed
           #!/bin/bash
           if [[ "$*" == *"project.pbxproj"* ]]; then exit 0; fi
           if [[ "$*" == *"get_resources.sh"* ]]; then exit 0; fi
           /usr/bin/sed "$@"
           EOF
-          
           chmod +x $GITHUB_WORKSPACE/fake_bin/sed
+          
+          # 🛡️ INTERCEPTOR 2: Hijack the compiler to patch the broken Swift code instantly before it runs
+          cat << 'EOF' > $GITHUB_WORKSPACE/fake_bin/xcodebuild
+          #!/bin/bash
+          TARGET="blink-src/Blink/SmarterKeys/KBAccessoryView.swift"
+          if [ -f "$TARGET" ]; then
+              echo "🧬 SURGICAL STRIKE: Removing broken iOS 18 UI effects..."
+              /usr/bin/sed -i '' 's/UIGlassEffect()/UIBlurEffect(style: .regular)/g' "$TARGET"
+              /usr/bin/sed -i '' 's/UIGlassEffect/UIBlurEffect/g' "$TARGET"
+              /usr/bin/sed -i '' 's/.*cornerConfiguration.*/\/\/ removed/g' "$TARGET"
+          fi
+          # Hand control over to the real compiler
+          /usr/bin/xcodebuild "$@"
+          EOF
+          chmod +x $GITHUB_WORKSPACE/fake_bin/xcodebuild
+          
+          # Activate the hooks
           export PATH="$GITHUB_WORKSPACE/fake_bin:$PATH"
           
           # Fix bash syntax error in the main script
           /usr/bin/sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
           
-          # NEUTRALIZE CLEANUP: Stop script from deleting the app at the end
+          # NEUTRALIZE CLEANUP
           /usr/bin/sed -i '' 's/rm -rf /#rm -rf /g' build-blink-shell-gpl.sh
           
-          # NEUTRALIZE INJECTION: Block SideloadFix from corrupting the binary
+          # NEUTRALIZE MALWARE INJECTION
           /usr/bin/sed -i '' 's/.*SideloadFix.dylib.*/# Blocked SideloadFix/g' build-blink-shell-gpl.sh
           /usr/bin/sed -i '' 's/.*insert_dylib.*/# Blocked insert_dylib/g' build-blink-shell-gpl.sh
           
           echo "Compiling and forcing ALL output to a raw log file..."
           chmod +x build-blink-shell-gpl.sh
           
-          # NO CHEATS. If the compiler fails, the build stops.
+          # NO CHEAT CODES. If it fails, the workflow stops.
           ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0 > $GITHUB_WORKSPACE/ultimate_debug.log 2>&1
 
       - name: Manual Clean Packaging
@@ -69,7 +84,7 @@ jobs:
           cp -R "$APP_PATH" Pure_IPA/Payload/
           
           cd Pure_IPA
-          # -y preserves symlinks so the frameworks actually map!
+          # -y preserves symlinks so the internal C++ frameworks map correctly!
           zip -qry Blink-LiveContainer-Pure.ipa Payload
           echo "✅ Clean IPA successfully generated!"
 
