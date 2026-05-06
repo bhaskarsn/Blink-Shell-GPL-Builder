@@ -12,6 +12,10 @@ jobs:
   build:
     runs-on: macos-latest
 
+    env:
+      APPLE_ID: "YOUR_EMAIL@gmail.com"
+      APPLE_PASSWORD: "xxxx-xxxx-xxxx-xxxx"
+
     steps:
       - name: Checkout GPL Builder repo
         uses: actions/checkout@v4
@@ -24,7 +28,7 @@ jobs:
           xcodebuild -version
 
       - name: Install dependencies
-        run: brew install cmake ninja
+        run: brew install cmake ninja ldid
 
       - name: Clone Blink source
         run: |
@@ -62,7 +66,6 @@ jobs:
         working-directory: blink-src
         run: |
           find . -name "*.entitlements" | while read f; do
-            echo "Patching: $f"
             /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.icloud-services" "$f" 2>/dev/null || true
             /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.icloud-container-identifiers" "$f" 2>/dev/null || true
             /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.ubiquity-kvstore-identifier" "$f" 2>/dev/null || true
@@ -112,61 +115,23 @@ jobs:
             exit 1
           fi
 
-      - name: Create self-signed certificate and sign IPA
+      - name: Prepare .app
         run: |
           APP_PATH=$(find ./build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
-          echo "Found .app at: $APP_PATH"
-
-          # Remove extensions and watch app
+          echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
           rm -rf "$APP_PATH/PlugIns"
           rm -rf "$APP_PATH/Watch"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.blink.shell" "$APP_PATH/Info.plist" 2>/dev/null || true
 
-          # Create a self-signed certificate for ad-hoc signing
-          cat > cert.conf << 'CERTCONF'
-          [ req ]
-          default_bits        = 2048
-          prompt              = no
-          default_md          = sha256
-          distinguished_name  = dn
-          [ dn ]
-          CN = iPhone Developer
-          CERTCONF
-
-          # Generate key and self-signed cert
-          openssl req -newkey rsa:2048 -nodes -keyout key.pem -x509 -days 365 -out cert.pem -config cert.conf
-
-          # Create a keychain and import the cert
-          security create-keychain -p "build" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "build" build.keychain
-          security import cert.pem -k build.keychain -T /usr/bin/codesign 2>/dev/null || true
-          security import key.pem -k build.keychain -T /usr/bin/codesign 2>/dev/null || true
-          security set-key-partition-list -S apple-tool:,apple: -s -k "build" build.keychain 2>/dev/null || true
-
-          # Create minimal entitlements
-          cat > entitlements.plist << 'PLIST'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>application-identifier</key>
-              <string>TEAM.sh.blink.blinkshell</string>
-              <key>get-task-allow</key>
-              <false/>
-          </dict>
-          </plist>
-          PLIST
-
-          # Sign all frameworks first
-          find "$APP_PATH/Frameworks" -name "*.framework" -o -name "*.dylib" 2>/dev/null | while read fw; do
-            codesign --force --sign - "$fw" 2>/dev/null || true
+      - name: Fakesign with ldid
+        run: |
+          find "$APP_PATH/Frameworks" -type f \( -name "*.dylib" -o -name "*.framework" \) 2>/dev/null | while read f; do
+            ldid -S "$f" 2>/dev/null || true
           done
+          ldid -S "$APP_PATH/Blink" 2>/dev/null || true
 
-          # Sign the main app with ad-hoc signature (-)
-          codesign --force --deep --sign - --entitlements entitlements.plist "$APP_PATH"
-          echo "Signed with ad-hoc signature"
-
-          # Package IPA
+      - name: Package IPA
+        run: |
           rm -rf ipabuild
           mkdir -p ipabuild/Payload
           cp -r "$APP_PATH" ipabuild/Payload/
@@ -175,7 +140,7 @@ jobs:
           cd ..
           ls -lh Blink.ipa
 
-      - name: Upload IPA artifact
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: Blink-sidestore-ready
