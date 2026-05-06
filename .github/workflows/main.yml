@@ -1,4 +1,4 @@
-name: Blink Shell (Final 2026 Pure Build)
+name: Blink Shell (2026 Clean Hands Protocol)
 on: [workflow_dispatch]
 
 jobs:
@@ -8,41 +8,44 @@ jobs:
       - name: Checkout Builder
         uses: actions/checkout@v4
 
-      - name: Force Xcode 16.2
+      - name: Switch to Xcode 16.2
         run: |
-          # Ensuring we use the SDK compatible with iPadOS 26 features
           XCODE_PATH=$(ls -d /Applications/Xcode_16.2*.app | head -n 1)
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
 
-      - name: Prepare Environment
+      - name: Setup Dependencies
         run: brew install jq automake autoconf libtool pkg-config || true
 
-      - name: Pre-Emptive Script Repair
+      - name: Target-Specific Script Patches
         run: |
-          # 1. Fix core script bash syntax[span_6](start_span)[span_6](end_span)
-          sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
+          # Verify script existence
+          if [ ! -f "build-blink-shell-gpl.sh" ]; then exit 1; fi
           
-          # 2. Disable the function that causes the "line 8" syntax error[span_7](start_span)[span_7](end_span)
-          sed -i '' 's/fix_get_resources/# fix_get_resources/g' build-blink-shell-gpl.sh
+          # 1. Disable the SideloadFix that crashes LiveContainer and 'curl[span_3](start_span)[span_4](start_span)'[span_3](end_span)[span_4](end_span)
+          sed -i '' 's/inject_sideload_fix/echo "🛡️ Shield: SideloadFix Disabled"/g' build-blink-shell-gpl.sh
           
-          # 3. Disable the SideloadFix that crashes LiveContainer[span_8](start_span)[span_8](end_span)[span_9](start_span)[span_9](end_span)
-          sed -i '' 's/inject_sideload_fix/# inject_sideload_fix/g' build-blink-shell-gpl.sh
+          # 2. Disable the resource fix that causes syntax errors on line 8[span_5](start_span)[span_5](end_span)
+          sed -i '' 's/fix_get_resources/echo "🛡️ Shield: Resource Fix Disabled"/g' build-blink-shell-gpl.sh
           
-          # 4. Stop the script from deleting the build folder[span_10](start_span)[span_10](end_span)
+          # 3. Stop the script from deleting the app folder so we can zip it ourselves[span_6](start_span)[span_6](end_span)
           sed -i '' 's/rm -rf /#rm -rf /g' build-blink-shell-gpl.sh
           
-          echo "✅ Script self-sabotage disabled."
+          echo "✅ Script cleaned safely without breaking functions."
 
-      - name: Compile Full Engine
+      - name: Compile with Surgical Compiler Hook
         run: |
-          # Deploy the surgical compiler hook to fix UI code errors[span_11](start_span)[span_11](end_span)[span_12](start_span)[span_12](end_span)
+          # This hook fixes the iOS 18 UI errors the second the compiler starts
           mkdir -p bin_hook
           cat << 'EOF' > bin_hook/xcodebuild
           #!/bin/bash
-          # Patch source code the instant it is cloned, before compilation starts[span_13](start_span)[span_13](end_span)
-          find . -name "KBAccessoryView.swift" -exec sed -i '' 's/UIGlassEffect/UIBlurEffect/g' {} +
-          find . -name "KBAccessoryView.swift" -exec sed -i '' 's/.*cornerConfiguration.*/\/\/ removed/g' {} +
-          find . -name "KBAccessoryView.swift" -exec sed -i '' 's/.*isInteractive.*/\/\/ removed/g' {} +
+          echo "🧬 Surgical Hook: Patching iPadOS 26 UI code..."
+          TARGET="blink-src/Blink/SmarterKeys/KBAccessoryView.swift"
+          if [ -f "$TARGET" ]; then
+              sed -i '' 's/UIGlassEffect/UIBlurEffect/g' "$TARGET"
+              sed -i '' 's/.*cornerConfiguration.*/\/\/ removed/g' "$TARGET"
+              sed -i '' 's/.*isInteractive.*/\/\/ removed/g' "$TARGET"
+              sed -i '' 's/.*tintColor.*/\/\/ removed/g' "$TARGET"
+          fi
           /usr/bin/xcodebuild "$@"
           EOF
           chmod +x bin_hook/xcodebuild
@@ -51,26 +54,33 @@ jobs:
           chmod +x build-blink-shell-gpl.sh
           ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
 
-      - name: Verified 2026 Packaging
+      - name: 2026 Integrity Packaging
         run: |
-          # Identify the 150MB+ app bundle (ignoring the 44MB shells)[span_14](start_span)[span_14](end_span)[span_15](start_span)[span_15](end_span)
+          # Dynamically find the HEAVIEST Blink.app (the 150MB+ one)[span_7](start_span)[span_7](end_span)[span_8](start_span)[span_8](end_span)
           APP_PATH=$(find . -name "Blink.app" -type d | xargs du -s | sort -n | tail -1 | awk '{print $2}')
           
           if [ -z "$APP_PATH" ] || [ ! -f "$APP_PATH/Blink" ]; then
-            echo "❌ ERROR: Ghost build detected. Terminal engine missing."
-            exit 1
+             echo "❌ FAIL: Ghost Build detected. Executable binary missing."
+             exit 1
           fi
           
-          echo "✅ Engine binary verified at $APP_PATH ($(du -sh $APP_PATH))"
+          echo "✅ Full Engine Verified: $(du -sh $APP_PATH)"
           
-          mkdir -p Final_IPA/Payload
-          cp -R "$APP_PATH" Final_IPA/Payload/
-          cd Final_IPA
-          # -y is critical to prevent "Bad file descriptor" on iPadOS 26[span_16](start_span)[span_16](end_span)
-          zip -qry Blink-v18.6.0-Full.ipa Payload
+          mkdir -p Pure_IPA/Payload
+          cp -R "$APP_PATH" Pure_IPA/Payload/
+          cd Pure_IPA
+          # -y flag is mandatory to preserve symlinks for iPadOS 26 mapping[span_9](start_span)[span_9](end_span)
+          zip -qry Blink-v18.6.0-Pure.ipa Payload
 
-      - name: Upload Artifacts
+      - name: Upload Final Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-Full-Weight-IPA
-          path: "Final_IPA/*.ipa"
+          name: Blink-Pure-150MB-IPA
+          path: "Pure_IPA/*.ipa"
+
+      - name: Upload Build Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Full-Build-Logs
+          path: build-output/build.log
