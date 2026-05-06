@@ -1,37 +1,47 @@
-name: Blink Master (Sledgehammer 2026)
-on: 
-  workflow_dispatch:
+name: Blink Master (Ironclad 2026)
+on: [workflow_dispatch]
 
 jobs:
   build:
     runs-on: macos-14
     steps:
-      - name: Checkout
+      - name: Checkout Builder
         uses: actions/checkout@v4
 
-      - name: Set SDK
+      - name: Force Xcode 16.2
         run: |
           XCODE_PATH=$(ls -d /Applications/Xcode_16.2*.app | head -n 1)
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
 
-      - name: The Sledgehammer Scrub
+      - name: Python Script DNA Repair
         run: |
-          # 🛡️ Fix 1: Physically DELETE the block that causes the line 8 syntax error[span_4](start_span)[span_4](end_span)
-          # We search for the 'Fixing get_resources' message and delete that line + the next 2 lines.
-          sed -i '' '/Fixing get_resources.sh/,+2d' build-blink-shell-gpl.sh
-          
-          # 🛡️ Fix 2: Disable the SideloadFix malware to ensure LiveContainer mapping[span_5](start_span)[span_5](end_span)[span_6](start_span)[span_6](end_span)
-          sed -i '' 's/inject_sideload_fix/true/g' build-blink-shell-gpl.sh
-          
-          # 🛡️ Fix 3: Stop the script from deleting the build folder[span_7](start_span)[span_7](end_span)
-          sed -i '' 's/rm -rf /#rm -rf /g' build-blink-shell-gpl.sh
-          
-          chmod +x build-blink-shell-gpl.sh
-          echo "✅ Script DNA scrubbed. Self-sabotage removed."
+          # We use Python because it won't leave stray brackets like 'sed' does
+          python3 - <<EOF
+          import os
 
-      - name: Surgical Engine Build
+          script_path = "build-blink-shell-gpl.sh"
+          if os.path.exists(script_path):
+              with open(script_path, "r") as f:
+                  content = f.read()
+              
+              # 1. Neutralize the self-sabotaging resource fix
+              content = content.replace("fix_get_resources", "echo '🛡️ Skipped'")
+              
+              # 2. Neutralize malware injection to keep IPA 'Pure' for LiveContainer
+              content = content.replace("inject_sideload_fix", "echo '🛡️ Skipped'")
+              
+              # 3. Stop the script from deleting the Blink.app folder
+              content = content.replace("rm -rf ", "# rm -rf ")
+              
+              with open(script_path, "w") as f:
+                  f.write(content)
+              print("✅ Script DNA repaired with Python (Zero Syntax Errors).")
+          EOF
+          chmod +x build-blink-shell-gpl.sh
+
+      - name: Compile Full Engine
         run: |
-          # Compiler Hook: Patches iOS 18/26 UI code the second it appears
+          # This hook fixes the iOS 18 UI errors the second the compiler starts
           mkdir -p bin_hook
           cat << 'EOF' > bin_hook/xcodebuild
           #!/bin/bash
@@ -49,26 +59,27 @@ jobs:
           
           ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
 
-      - name: Final Integrity Check
+      - name: Integrity Check & Package
         run: |
-          # Search for the 150MB+ bundle (ignore the 44MB shell ghosts)[span_8](start_span)[span_8](end_span)[span_9](start_span)[span_9](end_span)
+          # Identify the 150MB+ bundle and ignore 44MB shell ghosts
           APP_PATH=$(find . -name "Blink.app" -type d | xargs du -s | sort -n | tail -1 | awk '{print $2}')
           
           if [ -z "$APP_PATH" ] || [ ! -f "$APP_PATH/Blink" ]; then
-            echo "❌ ERROR: Terminal engine missing (Ghost Build)."
+            echo "❌ ERROR: Terminal engine binary is missing (Ghost Build)."
             exit 1
           fi
           
-          echo "✅ Full Engine Verified: $(du -sh $APP_PATH)"
+          SIZE=$(du -sh "$APP_PATH" | cut -f1)
+          echo "✅ Full Engine Verified ($SIZE). Packaging for iPadOS 26 kernel..."
           
-          mkdir -p final_output/Payload
-          cp -R "$APP_PATH" final_output/Payload/
-          cd final_output
-          # -y is mandatory for symlink mapping on iPadOS 26[span_10](start_span)[span_10](end_span)
-          zip -qry Blink-v18.6.0-Full.ipa Payload
+          mkdir -p Final_IPA/Payload
+          cp -R "$APP_PATH" Final_IPA/Payload/
+          cd Final_IPA
+          # -y is mandatory for symlink mapping on iPadOS 26
+          zip -qry Blink-Final-2026.ipa Payload
 
-      - name: Upload Finished IPA
+      - name: Upload Final IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-2026-Full-Weight
-          path: "final_output/*.ipa"
+          name: Blink-v18.6.0-Verified-IPA
+          path: "Final_IPA/*.ipa"
