@@ -1,4 +1,4 @@
-name: Build Blink Shell (Pure Package)
+name: Build Blink Shell (Ultimate Log & Pure Package)
 on: [workflow_dispatch]
 
 jobs:
@@ -16,7 +16,7 @@ jobs:
           echo "Setting up Systemless Shield..."
           mkdir -p $GITHUB_WORKSPACE/fake_bin
           
-          # Intercept destructive file edits
+          # Intercept destructive project file edits
           cat << 'EOF' > $GITHUB_WORKSPACE/fake_bin/sed
           #!/bin/bash
           if [[ "$*" == *"project.pbxproj"* ]]; then exit 0; fi
@@ -25,12 +25,17 @@ jobs:
           chmod +x $GITHUB_WORKSPACE/fake_bin/sed
           export PATH="$GITHUB_WORKSPACE/fake_bin:$PATH"
           
+          # Fix bash syntax error
           /usr/bin/sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
           
-          echo "Compiling..."
+          # NEUTRALIZE CLEANUP: Stop the script from deleting the app when it finishes
+          /usr/bin/sed -i '' 's/rm -rf /#rm -rf /g' build-blink-shell-gpl.sh
+          
+          echo "Compiling and forcing ALL output to a raw log file..."
           chmod +x build-blink-shell-gpl.sh
-          # The script will compile the code, but we will ignore the IPA it outputs
-          ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0 || true
+          
+          # The || true ensures the workflow continues so logs are uploaded even on a crash
+          ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0 > $GITHUB_WORKSPACE/ultimate_debug.log 2>&1 || true
 
       - name: Manual Clean Packaging
         run: |
@@ -38,11 +43,12 @@ jobs:
           echo "📦 Stealing the raw app for LiveContainer packaging..."
           echo "=================================================="
           
-          # Find the pure, untouched compiled app directly from Xcode's output
-          APP_PATH=$(find build-output -type d -name "Blink.app" | head -n 1)
+          # Broaden the search to the entire workspace just in case
+          APP_PATH=$(find . -type d -name "Blink.app" | head -n 1)
           
           if [ -z "$APP_PATH" ]; then
-            echo "❌ ERROR: Blink.app not found! The compiler didn't generate it."
+            echo "❌ ERROR: Blink.app not found! The compiler crashed before finishing."
+            echo "🚨 CHECK THE 'Build-Debug-Logs' ARTIFACT FOR THE EXACT ERROR."
             exit 1
           fi
           
@@ -58,6 +64,7 @@ jobs:
           echo "✅ Clean IPA successfully generated!"
 
       - name: Upload Pure IPA
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Blink-LiveContainer-Pure
@@ -68,6 +75,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Build-Debug-Logs
-          path: |
-            build-output/build.log
-            *.log
+          path: ultimate_debug.log
