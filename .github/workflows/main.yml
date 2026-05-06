@@ -11,30 +11,38 @@ jobs:
       - name: Setup Dependencies
         run: brew install jq automake autoconf libtool pkg-config
 
-      - name: The Shield & Build Phase
+      - name: The Upgraded Shield & Build Phase
         run: |
-          echo "Setting up Systemless Shield..."
+          echo "Setting up Upgraded Systemless Shield..."
           mkdir -p $GITHUB_WORKSPACE/fake_bin
           
-          # Intercept destructive project file edits
+          # 🛡️ INTERCEPTOR: Block edits to the project file AND the resources script
           cat << 'EOF' > $GITHUB_WORKSPACE/fake_bin/sed
           #!/bin/bash
-          if [[ "$*" == *"project.pbxproj"* ]]; then exit 0; fi
+          if [[ "$*" == *"project.pbxproj"* ]]; then 
+              echo "Blocked project.pbxproj destruction"
+              exit 0 
+          fi
+          if [[ "$*" == *"get_resources.sh"* ]]; then 
+              echo "Blocked get_resources.sh corruption"
+              exit 0 
+          fi
           /usr/bin/sed "$@"
           EOF
+          
           chmod +x $GITHUB_WORKSPACE/fake_bin/sed
           export PATH="$GITHUB_WORKSPACE/fake_bin:$PATH"
           
-          # Fix bash syntax error
+          # Fix bash syntax error in the main script
           /usr/bin/sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
           
-          # NEUTRALIZE CLEANUP: Stop the script from deleting the app when it finishes
+          # NEUTRALIZE CLEANUP: Stop script from deleting the app at the end
           /usr/bin/sed -i '' 's/rm -rf /#rm -rf /g' build-blink-shell-gpl.sh
           
           echo "Compiling and forcing ALL output to a raw log file..."
           chmod +x build-blink-shell-gpl.sh
           
-          # The || true ensures the workflow continues so logs are uploaded even on a crash
+          # THE LOG SAVER (Permanently active)
           ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0 > $GITHUB_WORKSPACE/ultimate_debug.log 2>&1 || true
 
       - name: Manual Clean Packaging
@@ -43,22 +51,18 @@ jobs:
           echo "📦 Stealing the raw app for LiveContainer packaging..."
           echo "=================================================="
           
-          # Broaden the search to the entire workspace just in case
           APP_PATH=$(find . -type d -name "Blink.app" | head -n 1)
           
           if [ -z "$APP_PATH" ]; then
             echo "❌ ERROR: Blink.app not found! The compiler crashed before finishing."
-            echo "🚨 CHECK THE 'Build-Debug-Logs' ARTIFACT FOR THE EXACT ERROR."
             exit 1
           fi
           
           echo "✅ Found untouched compiled app at: $APP_PATH"
           
-          # Create the strict structure LiveContainer requires
           mkdir -p Pure_IPA/Payload
           cp -R "$APP_PATH" Pure_IPA/Payload/
           
-          # Zip it cleanly
           cd Pure_IPA
           zip -qr Blink-LiveContainer-Pure.ipa Payload
           echo "✅ Clean IPA successfully generated!"
