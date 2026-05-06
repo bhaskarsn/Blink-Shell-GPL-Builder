@@ -1,4 +1,4 @@
-name: Build Blink Shell (iPadOS 26 Protocol)
+name: Build Blink Shell (Ironclad 2026)
 on: [workflow_dispatch]
 
 jobs:
@@ -8,53 +8,45 @@ jobs:
       - name: Checkout Builder
         uses: actions/checkout@v4
 
-      - name: Switch to Newest SDK
+      - name: Switch to Latest SDK
         run: |
-          # Dynamically find the absolute newest Xcode available on the runner
           XCODE_PATH=$(ls -d /Applications/Xcode_*.app | sort -V | tail -n 1)
-          echo "Using SDK at: $XCODE_PATH"
           sudo xcode-select -s $XCODE_PATH/Contents/Developer
 
       - name: Setup Dependencies
         run: brew install jq automake autoconf libtool pkg-config
 
-      - name: Deploy 2026 System Hooks
+      - name: Deploy Ironclad Hooks
         run: |
           mkdir -p $GITHUB_WORKSPACE/fake_bin
           
-          # 🛡️ HOOK 1: The Watcher Interceptor
-          # This hooks 'sed' to patch the broken Swift code the moment cloning finishes
-          cat << 'EOF' > $GITHUB_WORKSPACE/fake_bin/sed
+          # 🛡️ HOOK 1: The Compiler Hijack
+          # This patches the code at the absolute last millisecond before compilation
+          cat << 'EOF' > $GITHUB_WORKSPACE/fake_bin/xcodebuild
           #!/bin/bash
-          TARGET="blink-src/Blink/SmarterKeys/KBAccessoryView.swift"
-          if [ -f "$TARGET" ]; then
-              echo "🧬 SURGICAL PATCH: Fixing iOS 18/26 UI incompatibilities..."
-              /usr/bin/sed -i '' 's/UIGlassEffect()/UIBlurEffect(style: .regular)/g' "$TARGET"
-              /usr/bin/sed -i '' 's/UIGlassEffect/UIBlurEffect/g' "$TARGET"
-              /usr/bin/sed -i '' 's/.*cornerConfiguration.*/\/\/ removed/g' "$TARGET"
-          fi
-          # Block script from breaking the project files
-          if [[ "$*" == *"project.pbxproj"* || "$*" == *"get_resources.sh"* ]]; then exit 0; fi
-          /usr/bin/sed "$@"
+          echo "🧬 Ironclad Hijack: Patching source code..."
+          # Find the file wherever it is and fix the iOS 18/26 incompatibilities
+          find . -name "KBAccessoryView.swift" -exec sed -i '' 's/UIGlassEffect()/UIBlurEffect(style: .regular)/g' {} +
+          find . -name "KBAccessoryView.swift" -exec sed -i '' 's/UIGlassEffect/UIBlurEffect/g' {} +
+          find . -name "KBAccessoryView.swift" -exec sed -i '' 's/.*cornerConfiguration.*/\/\/ removed/g' {} +
+          
+          # Hand off to the real compiler
+          /usr/bin/xcodebuild "$@"
           EOF
           
-          # 🛡️ HOOK 2: Malware Neutralizer
-          cat << 'EOF' > $GITHUB_WORKSPACE/fake_bin/insert_dylib
-          #!/bin/bash
-          echo "🛡️ Shield blocked LiveContainer-crashing injection."
-          exit 0
-          EOF
-          
-          # 🛡️ HOOK 3: Anti-Ghost Build & Symlink Guard
+          # 🛡️ HOOK 2: The Binary Size Guard
+          # This hook will physically kill the build if the result is a 44MB shell
           cat << 'EOF' > $GITHUB_WORKSPACE/fake_bin/zip
           #!/bin/bash
-          # Verify the build isn't a 6MB hollow shell
-          SIZE=$(du -sm . | cut -f1)
-          if [ "$SIZE" -lt 50 ]; then
-              echo "❌ ERROR: Binary engine missing (Ghost Build). Compiler failed internally."
-              exit 1
+          # Look for the Blink binary in the folder being zipped
+          if [[ "$*" == *"Payload"* ]]; then
+              BINARY_CHECK=$(find . -name "Blink" -type f -size +50M)
+              if [ -z "$BINARY_CHECK" ]; then
+                  echo "❌ FATAL ERROR: Ghost Build Detected (44MB Shell). Engine binary is missing or too small."
+                  exit 1
+              fi
+              echo "✅ Engine binary verified (>50MB). Proceeding to package..."
           fi
-          echo "✅ Full binary detected ($SIZE MB). Packaging with symlinks..."
           /usr/bin/zip -y "$@"
           EOF
           
@@ -62,18 +54,19 @@ jobs:
           export PATH="$GITHUB_WORKSPACE/fake_bin:$PATH"
           
           # Fix script syntax
-          /usr/bin/sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
-          # Neutralize auto-cleanup
-          /usr/bin/sed -i '' 's/rm -rf /#rm -rf /g' build-blink-shell-gpl.sh
+          sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
+          # Block malware injection and auto-cleanup
+          sed -i '' 's/.*SideloadFix.dylib.*/# Blocked/g' build-blink-shell-gpl.sh
+          sed -i '' 's/rm -rf /#rm -rf /g' build-blink-shell-gpl.sh
           
-          echo "🚀 Starting High-Intensity Compilation..."
+          echo "🚀 Starting Ironclad Compilation..."
           chmod +x build-blink-shell-gpl.sh
-          ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0 > build_output.log 2>&1 || true
+          ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0 > full_debug.log 2>&1
 
-      - name: Upload Verified IPA
+      - name: Upload Ironclad IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-Final-2026-Pure
+          name: Blink-Final-Verified-IPA
           path: "dist/*.ipa"
 
       - name: Upload Logs
@@ -82,5 +75,5 @@ jobs:
         with:
           name: Full-Build-Logs
           path: |
-            build_output.log
+            full_debug.log
             build-output/build.log
