@@ -2,88 +2,76 @@ name: Build Blink Shell IPA
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
+    inputs:
+      version:
+        description: 'Blink version tag (e.g. v18.4.2), leave empty for latest'
+        required: false
+        default: ''
 
 jobs:
   build:
     runs-on: macos-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout GPL Builder repo
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
-      - name: Select Xcode version
+      - name: Select latest available Xcode
         run: |
           XCODE=$(ls /Applications | grep "Xcode_" | sort -V | tail -1)
           echo "Using $XCODE"
           sudo xcode-select -s /Applications/$XCODE/Contents/Developer
+          xcodebuild -version
 
-      - name: Install dependencies (Homebrew)
+      - name: Install dependencies
         run: |
-          brew install cmake
-          brew install ninja
+          brew install cmake ninja
 
-      - name: Set up Ruby & CocoaPods
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.2'
-          bundler-cache: true
-
-      - name: Install CocoaPods
-        run: gem install cocoapods --no-document
-
-      - name: Debug repo structure
+      - name: Clone Blink source
         run: |
-          echo "=== Root directory ==="
-          ls -la
-          echo "=== Searching for Podfile ==="
-          find . -name "Podfile" 2>/dev/null || echo "NO Podfile found anywhere"
-          echo "=== Searching for .xcworkspace ==="
-          find . -name "*.xcworkspace" -not -path "*/xcuserdata/*" 2>/dev/null || echo "NO xcworkspace found"
-          echo "=== Searching for .xcodeproj ==="
-          find . -name "*.xcodeproj" -not -path "*/xcuserdata/*" 2>/dev/null || echo "NO xcodeproj found"
-
-      - name: Install Pod dependencies
-        run: |
-          # Try root first, then search subdirectories
-          if [ -f "Podfile" ]; then
-            echo "Podfile found in root"
-            pod install --repo-update
+          VERSION="${{ github.event.inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            echo "Cloning latest Blink source..."
+            git clone --recursive https://github.com/blinksh/blink.git blink-src
           else
-            PODFILE_PATH=$(find . -name "Podfile" -not -path "*/Pods/*" -maxdepth 4 2>/dev/null | head -n 1)
-            if [ -z "$PODFILE_PATH" ]; then
-              echo "ERROR: No Podfile found in repo"
-              exit 1
-            fi
-            PODFILE_DIR=$(dirname "$PODFILE_PATH")
-            echo "Podfile found at: $PODFILE_PATH, cd into: $PODFILE_DIR"
-            echo "PODFILE_DIR=$PODFILE_DIR" >> $GITHUB_ENV
-            cd "$PODFILE_DIR"
-            pod install --repo-update
+            echo "Cloning Blink $VERSION..."
+            git clone --recursive --branch "$VERSION" https://github.com/blinksh/blink.git blink-src
           fi
 
-      - name: Find workspace path
+      - name: Get prebuilt frameworks
+        working-directory: blink-src
         run: |
-          WORKSPACE=$(find . -name "*.xcworkspace" -not -path "*/Pods/*" -not -path "*/xcuserdata/*" | head -n 1)
-          echo "Found workspace: $WORKSPACE"
-          echo "WORKSPACE=$WORKSPACE" >> $GITHUB_ENV
+          ./get_frameworks.sh
+
+      - name: Get resources
+        working-directory: blink-src
+        run: |
+          if [ -f "./get_resources.sh" ]; then
+            ./get_resources.sh
+          else
+            echo "No get_resources.sh found, skipping"
+          fi
+
+      - name: Remove shared data (avoids signing conflicts)
+        working-directory: blink-src
+        run: |
+          rm -rf Blink.xcodeproj/project.xcworkspace/xcshareddata/
 
       - name: Build IPA (unsigned)
+        working-directory: blink-src
         run: |
           xcodebuild \
-            -workspace "$WORKSPACE" \
+            -project Blink.xcodeproj \
             -scheme Blink \
             -configuration Release \
             -sdk iphoneos \
-            -derivedDataPath ./build \
+            -derivedDataPath ../build \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_ENTITLEMENTS="" \
             ONLY_ACTIVE_ARCH=NO \
+            ENABLE_BITCODE=NO \
             clean build
 
       - name: Package IPA
@@ -93,7 +81,7 @@ jobs:
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -r Blink.ipa Payload
-          echo "IPA built at: Blink.ipa"
+          ls -lh Blink.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
