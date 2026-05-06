@@ -11,26 +11,30 @@ jobs:
       - name: Setup Dependencies
         run: brew install jq automake autoconf libtool pkg-config
 
-      - name: Run Builder (Setup & Patch Phase)
-        # We EXPECT this to fail at the Xcode phase, but it will successfully 
-        # download the code and patch the paywall first.
-        continue-on-error: true 
+      - name: Disarm the Builder Script
         run: |
+          # 1. DESTROY the script's ability to edit the project file
+          # This prevents it from deleting the semicolon on line 4294
+          sed -i '' 's/.*sed.*project\.pbxproj.*/echo "Skipped breaking project file"/g' build-blink-shell-gpl.sh
+          
+          # 2. DESTROY the script's ability to run the compiler
+          # We will run xcodebuild ourselves so it doesn't crash here
+          sed -i '' 's/.*xcodebuild.*/echo "Skipped internal xcodebuild"/g' build-blink-shell-gpl.sh
+          
+          # 3. Fix the bash syntax crash (the empty brackets issue)
           sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
+
+      - name: Run Disarmed Script (Setup & Patch Phase)
+        run: |
+          echo "Running disarmed script to download source and patch paywall..."
           chmod +x build-blink-shell-gpl.sh
           ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
-
-      - name: Heal Project DNA
-        run: |
-          echo "Restoring corrupted project file to factory state..."
-          cd blink-src
-          git checkout Blink.xcodeproj/project.pbxproj
-          echo "DNA Healed. Extensions restored."
+          echo "Script finished successfully without compiling."
 
       - name: Manual Xcode Compilation
         run: |
-          echo "Running pure Xcode compilation bypassing the broken script..."
-          # This is the EXACT command from your log, but running on the healed file
+          echo "Starting pure compilation on the UNBROKEN project file..."
+          # Running the exact command, but since the file isn't broken, it will pass
           xcodebuild -project blink-src/Blink.xcodeproj \
             -scheme Blink \
             -configuration Release \
@@ -42,22 +46,19 @@ jobs:
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGN_ENTITLEMENTS=$PWD/blink-src/Blink/Blink-sideload.entitlements \
             DEAD_CODE_STRIPPING=NO \
             ENABLE_PREVIEWS=NO \
             build
 
       - name: Package IPA Manually
         run: |
-          echo "Packaging IPA for LiveContainer..."
+          echo "Packaging full IPA for LiveContainer..."
           mkdir -p Payload
-          # Grab the compiled binary directly from the output folder
           cp -R build-output/Products/Blink.app Payload/
           
           mkdir -p dist
-          # Zip it up exactly how LiveContainer expects
           zip -qr dist/Blink-LiveContainer-v18.6.0.ipa Payload
-          echo "Packaging complete!"
+          echo "Done!"
 
       - name: Upload Final IPA
         uses: actions/upload-artifact@v4
@@ -70,4 +71,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Build-Debug-Logs
-          path: build-output/build.log
+          path: |
+            build-output/build.log
+            *.log
