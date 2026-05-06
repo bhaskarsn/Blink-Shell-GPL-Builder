@@ -19,14 +19,8 @@ jobs:
           # 🛡️ INTERCEPTOR: Block edits to the project file AND the resources script
           cat << 'EOF' > $GITHUB_WORKSPACE/fake_bin/sed
           #!/bin/bash
-          if [[ "$*" == *"project.pbxproj"* ]]; then 
-              echo "Blocked project.pbxproj destruction"
-              exit 0 
-          fi
-          if [[ "$*" == *"get_resources.sh"* ]]; then 
-              echo "Blocked get_resources.sh corruption"
-              exit 0 
-          fi
+          if [[ "$*" == *"project.pbxproj"* ]]; then exit 0; fi
+          if [[ "$*" == *"get_resources.sh"* ]]; then exit 0; fi
           /usr/bin/sed "$@"
           EOF
           
@@ -38,6 +32,10 @@ jobs:
           
           # NEUTRALIZE CLEANUP: Stop script from deleting the app at the end
           /usr/bin/sed -i '' 's/rm -rf /#rm -rf /g' build-blink-shell-gpl.sh
+          
+          # NEUTRALIZE INJECTION: Block SideloadFix from corrupting the binary
+          /usr/bin/sed -i '' 's/.*SideloadFix.dylib.*/# Blocked SideloadFix/g' build-blink-shell-gpl.sh
+          /usr/bin/sed -i '' 's/.*insert_dylib.*/# Blocked insert_dylib/g' build-blink-shell-gpl.sh
           
           echo "Compiling and forcing ALL output to a raw log file..."
           chmod +x build-blink-shell-gpl.sh
@@ -51,20 +49,22 @@ jobs:
           echo "📦 Stealing the raw app for LiveContainer packaging..."
           echo "=================================================="
           
-          APP_PATH=$(find . -type d -name "Blink.app" | head -n 1)
+          # Hardcode the exact path we know the compiler outputs to
+          APP_PATH="build-output/Products/Blink.app"
           
-          if [ -z "$APP_PATH" ]; then
-            echo "❌ ERROR: Blink.app not found! The compiler crashed before finishing."
+          if [ ! -d "$APP_PATH" ]; then
+            echo "❌ ERROR: Blink.app not found at $APP_PATH! The compiler crashed."
             exit 1
           fi
           
-          echo "✅ Found untouched compiled app at: $APP_PATH"
+          echo "✅ Found untouched, uninjected compiled app!"
           
           mkdir -p Pure_IPA/Payload
           cp -R "$APP_PATH" Pure_IPA/Payload/
           
           cd Pure_IPA
-          zip -qr Blink-LiveContainer-Pure.ipa Payload
+          # CRITICAL FIX: The -y flag preserves symlinks. Without this, the app dies.
+          zip -qry Blink-LiveContainer-Pure.ipa Payload
           echo "✅ Clean IPA successfully generated!"
 
       - name: Upload Pure IPA
