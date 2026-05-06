@@ -1,6 +1,6 @@
-name: Blink Master 2026
+name: Blink Master (Sledgehammer 2026)
 on: 
-  workflow_dispatch: # This creates the "Run" button
+  workflow_dispatch:
 
 jobs:
   build:
@@ -9,23 +9,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set Compiler
+      - name: Set SDK
         run: |
           XCODE_PATH=$(ls -d /Applications/Xcode_16.2*.app | head -n 1)
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
 
-      - name: Fix Build Script DNA
+      - name: The Sledgehammer Scrub
         run: |
-          # Disable functions that crash on GitHub servers or LiveContainer[span_5](start_span)[span_5](end_span)[span_6](start_span)[span_6](end_span)
-          # We use 'true' to safely bypass without breaking Bash syntax[span_7](start_span)[span_7](end_span)
-          sed -i '' 's/fix_get_resources/true/g' build-blink-shell-gpl.sh
+          # 🛡️ Fix 1: Physically DELETE the block that causes the line 8 syntax error[span_4](start_span)[span_4](end_span)
+          # We search for the 'Fixing get_resources' message and delete that line + the next 2 lines.
+          sed -i '' '/Fixing get_resources.sh/,+2d' build-blink-shell-gpl.sh
+          
+          # 🛡️ Fix 2: Disable the SideloadFix malware to ensure LiveContainer mapping[span_5](start_span)[span_5](end_span)[span_6](start_span)[span_6](end_span)
           sed -i '' 's/inject_sideload_fix/true/g' build-blink-shell-gpl.sh
+          
+          # 🛡️ Fix 3: Stop the script from deleting the build folder[span_7](start_span)[span_7](end_span)
           sed -i '' 's/rm -rf /#rm -rf /g' build-blink-shell-gpl.sh
+          
           chmod +x build-blink-shell-gpl.sh
+          echo "✅ Script DNA scrubbed. Self-sabotage removed."
 
-      - name: Build Terminal Engine
+      - name: Surgical Engine Build
         run: |
-          # Surgical Hook: Fixes UIGlassEffect errors in real-time
+          # Compiler Hook: Patches iOS 18/26 UI code the second it appears
           mkdir -p bin_hook
           cat << 'EOF' > bin_hook/xcodebuild
           #!/bin/bash
@@ -34,6 +40,7 @@ jobs:
               sed -i '' 's/UIGlassEffect/UIBlurEffect/g' "$TARGET"
               sed -i '' 's/.*cornerConfiguration.*/\/\/ removed/g' "$TARGET"
               sed -i '' 's/.*isInteractive.*/\/\/ removed/g' "$TARGET"
+              sed -i '' 's/.*tintColor.*/\/\/ removed/g' "$TARGET"
           fi
           /usr/bin/xcodebuild "$@"
           EOF
@@ -42,26 +49,26 @@ jobs:
           
           ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
 
-      - name: Integrity Check & Package
+      - name: Final Integrity Check
         run: |
-          # Identify the 150MB+ bundle and ignore 44MB shells[span_8](start_span)[span_8](end_span)[span_9](start_span)[span_9](end_span)
+          # Search for the 150MB+ bundle (ignore the 44MB shell ghosts)[span_8](start_span)[span_8](end_span)[span_9](start_span)[span_9](end_span)
           APP_PATH=$(find . -name "Blink.app" -type d | xargs du -s | sort -n | tail -1 | awk '{print $2}')
           
           if [ -z "$APP_PATH" ] || [ ! -f "$APP_PATH/Blink" ]; then
-            echo "❌ ERROR: Engine binary missing (Ghost Build)."
+            echo "❌ ERROR: Terminal engine missing (Ghost Build)."
             exit 1
           fi
           
           echo "✅ Full Engine Verified: $(du -sh $APP_PATH)"
           
-          mkdir -p dist/Payload
-          cp -R "$APP_PATH" dist/Payload/
-          cd dist
-          # -y flag is mandatory for iPadOS 26 mapping[span_10](start_span)[span_10](end_span)
+          mkdir -p final_output/Payload
+          cp -R "$APP_PATH" final_output/Payload/
+          cd final_output
+          # -y is mandatory for symlink mapping on iPadOS 26[span_10](start_span)[span_10](end_span)
           zip -qry Blink-v18.6.0-Full.ipa Payload
 
-      - name: Upload Final IPA
+      - name: Upload Finished IPA
         uses: actions/upload-artifact@v4
         with:
           name: Blink-2026-Full-Weight
-          path: "dist/*.ipa"
+          path: "final_output/*.ipa"
