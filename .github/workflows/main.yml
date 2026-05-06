@@ -40,8 +40,7 @@ jobs:
 
       - name: Get prebuilt frameworks
         working-directory: blink-src
-        run: |
-          ./get_frameworks.sh
+        run: ./get_frameworks.sh
 
       - name: Get resources
         working-directory: blink-src
@@ -54,12 +53,12 @@ jobs:
 
       - name: Remove shared data (avoids signing conflicts)
         working-directory: blink-src
-        run: |
-          rm -rf Blink.xcodeproj/project.xcworkspace/xcshareddata/
+        run: rm -rf Blink.xcodeproj/project.xcworkspace/xcshareddata/
 
       - name: Build IPA (unsigned)
         working-directory: blink-src
         run: |
+          set -o pipefail
           xcodebuild \
             -project Blink.xcodeproj \
             -scheme Blink \
@@ -72,7 +71,24 @@ jobs:
             CODE_SIGN_ENTITLEMENTS="" \
             ONLY_ACTIVE_ARCH=NO \
             ENABLE_BITCODE=NO \
-            clean build
+            clean build 2>&1 | tee ../build.log
+          echo "BUILD_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
+
+      - name: Upload build log (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7
+
+      - name: Fail if build failed
+        if: always()
+        run: |
+          if [ "${BUILD_EXIT}" != "0" ]; then
+            echo "Build failed with exit code ${BUILD_EXIT}. Check build-log artifact."
+            exit 1
+          fi
 
       - name: Package IPA
         run: |
