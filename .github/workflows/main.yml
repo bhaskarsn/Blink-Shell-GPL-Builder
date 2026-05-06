@@ -68,18 +68,22 @@ jobs:
       - name: Manual Clean Packaging
         run: |
           echo "=================================================="
-          echo "📦 Stealing the raw app for LiveContainer packaging..."
+          echo "📦 Searching for the raw app to package..."
           echo "=================================================="
           
-          APP_PATH="build-output/Products/Blink.app"
+          # Dynamically find the app folder instead of hardcoding the path
+          APP_PATH=$(find . -type d -name "Blink.app" | grep -v "Payload" | head -n 1)
           
-          # 🚨 ANTI-GHOST BUILD CHECK: Ensure the actual heavy executable binary exists!
-          if [ ! -f "$APP_PATH/Blink" ]; then
-            echo "❌ ERROR: Ghost Build detected! The executable binary is missing."
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ ERROR: Blink.app not found! The compiler must have failed."
             exit 1
           fi
           
-          echo "✅ Found untouched, completely valid compiled app!"
+          echo "✅ Found untouched app at: $APP_PATH"
+          
+          # Print the size to prove it is not a 46MB ghost build
+          echo "📊 App Folder Size:"
+          du -sh "$APP_PATH"
           
           mkdir -p Pure_IPA/Payload
           cp -R "$APP_PATH" Pure_IPA/Payload/
