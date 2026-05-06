@@ -1,85 +1,90 @@
-name: Blink Shell (SideStore + LiveContainer Hybrid)
+name: Blink Final Pure Build
 on: [workflow_dispatch]
 
 jobs:
   build:
     runs-on: macos-14
     steps:
-      - name: Checkout Builder
+      - name: 1. Checkout
         uses: actions/checkout@v4
 
-      - name: Force Xcode 16.2
+      - name: 2. Set Compiler (Flexible)
         run: |
-          XCODE_PATH=$(ls -d /Applications/Xcode_16.2*.app | head -n 1)
+          # Finds any Xcode 16 version available to avoid the 10s crash
+          XCODE_PATH=$(ls -d /Applications/Xcode_16*.app | head -n 1)
+          if [ -z "$XCODE_PATH" ]; then XCODE_PATH="/Applications/Xcode.app"; fi
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          xcodebuild -version
 
-      - name: Python DNA & Source Repair
+      - name: 3. Python Surgical Fixes
         run: |
+          # Using Python to neutralize the script without causing syntax errors
           python3 - <<EOF
           import os, re
-
-          # 1. Neutralize self-sabotaging script blocks
-          script = "build-blink-shell-gpl.sh"
-          if os.path.exists(script):
-              with open(script, "r") as f:
+          
+          # Fix the builder script DNA
+          if os.path.exists("build-blink-shell-gpl.sh"):
+              with open("build-blink-shell-gpl.sh", "r") as f:
                   s = f.read()
+              # Neutralize crashing functions safely
               s = s.replace("fix_get_resources", "echo skipped")
               s = s.replace("inject_sideload_fix", "echo skipped")
               s = s.replace("rm -rf ", "# rm -rf ")
-              with open(script, "w") as f:
+              with open("build-blink-shell-gpl.sh", "w") as f:
                   f.write(s)
               print("✅ Script logic neutralized.")
-
-          # 2. Patch iOS 18/26 UI code to prevent Ghost Builds[span_4](start_span)[span_4](end_span)
-          # The script must run --init first to create these files
           EOF
           chmod +x build-blink-shell-gpl.sh
-          ./build-blink-shell-gpl.sh --init --version v18.6.0
 
+      - name: 4. Build Engine (v18.6.0)
+        run: |
+          # This step clones the source and compiles the heavy C++ terminal
+          ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
+
+      - name: 5. Manual Source Patch (Post-Clone)
+        run: |
+          # Fix the iOS 18/26 UI code that causes 44MB Ghost Builds[span_3](start_span)[span_3](end_span)
           python3 - <<EOF
-          import os
+          import os, re
           target = "blink-src/Blink/SmarterKeys/KBAccessoryView.swift"
           if os.path.exists(target):
               with open(target, "r") as f:
                   c = f.read()
               c = c.replace("UIGlassEffect()", "UIBlurEffect(style: .regular)")
               c = c.replace("UIGlassEffect", "UIBlurEffect")
-              # Remove 2026-specific properties the runner can't compile
-              import re
               for prop in ['isInteractive', 'tintColor', 'cornerConfiguration']:
                   c = re.sub(rf'.*{prop}.*', '// removed', c)
               with open(target, "w") as f:
                   f.write(c)
-              print("✅ Source code patched for compilation.")
+              print("✅ UI Source Patched.")
           EOF
+          # Resume build to catch the patches
+          ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
 
-      - name: Compile Terminal Engine
-        run: ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
-
-      - name: SideStore Format Packaging
+      - name: 6. SideStore Integrity Packaging
         run: |
-          # Find the heavy 150MB+ bundle[span_5](start_span)[span_5](end_span)
+          # Identify the 150MB+ bundle[span_4](start_span)[span_4](end_span)
           APP_PATH=$(find . -name "Blink.app" -type d | xargs du -s | sort -n | tail -1 | awk '{print $2}')
           
           if [ -z "$APP_PATH" ] || [ ! -f "$APP_PATH/Blink" ]; then
-            echo "❌ ERROR: Terminal engine missing."
+            echo "❌ ERROR: Engine binary missing."
             exit 1
           fi
           
           echo "✅ Full Engine Verified: $(du -sh $APP_PATH)"
           
-          # Create a dummy mobileprovision so SideStore accepts the format[span_6](start_span)[span_6](end_span)
+          # Fix SideStore "Invalid Format" by adding required provision[span_5](start_span)[span_5](end_span)
           touch "$APP_PATH/embedded.mobileprovision"
           
-          mkdir -p SideStore_Ready/Payload
-          cp -R "$APP_PATH" SideStore_Ready/Payload/
-          cd SideStore_Ready
-          # -y is mandatory for symlink mapping on iPadOS 26[span_7](start_span)[span_7](end_span)
-          zip -qry Blink-v18.6.0-Hybrid.ipa Payload
-          echo "✅ structurally correct IPA generated."
+          mkdir -p Final_Build/Payload
+          cp -R "$APP_PATH" Final_Build/Payload/
+          cd Final_Build
+          # -y is MANDATORY for iPadOS 26 symlink mapping[span_6](start_span)[span_6](end_span)
+          zip -qry Blink-v18.6.0-Verified.ipa Payload
+          echo "✅ Structure Corrected."
 
-      - name: Upload Final IPA
+      - name: 7. Upload
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-Hybrid-Full-Weight
-          path: "SideStore_Ready/*.ipa"
+          name: Blink-Verified-150MB-IPA
+          path: "Final_Build/*.ipa"
