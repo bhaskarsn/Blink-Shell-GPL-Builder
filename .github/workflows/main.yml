@@ -1,4 +1,4 @@
-name: Build Blink Shell
+name: Build Blink Shell (Pure Package)
 on: [workflow_dispatch]
 
 jobs:
@@ -11,42 +11,57 @@ jobs:
       - name: Setup Dependencies
         run: brew install jq automake autoconf libtool pkg-config
 
-      - name: The Shield Build (PATH Override)
+      - name: The Shield & Build Phase
         run: |
           echo "Setting up Systemless Shield..."
           mkdir -p $GITHUB_WORKSPACE/fake_bin
           
-          # 1. Create our "Fake sed" interceptor
+          # Intercept destructive file edits
           cat << 'EOF' > $GITHUB_WORKSPACE/fake_bin/sed
           #!/bin/bash
-          # If the script tries to edit the project file, we block it and pretend it succeeded.
-          if [[ "$*" == *"project.pbxproj"* ]]; then
-              echo "🛡️ SHIELD: Blocked destructive sed command on project.pbxproj!"
-              exit 0 
-          fi
-          # For all other commands (like bypassing the paywall), run the real macOS sed.
+          if [[ "$*" == *"project.pbxproj"* ]]; then exit 0; fi
           /usr/bin/sed "$@"
           EOF
-          
-          # Make our fake sed executable
           chmod +x $GITHUB_WORKSPACE/fake_bin/sed
-          
-          # 2. Put our shield at the very front of the system PATH
           export PATH="$GITHUB_WORKSPACE/fake_bin:$PATH"
           
-          # 3. Use the REAL sed one time to fix the bash syntax "()" crash
           /usr/bin/sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
           
-          # 4. Launch the builder script!
+          echo "Compiling..."
           chmod +x build-blink-shell-gpl.sh
-          ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
+          # The script will compile the code, but we will ignore the IPA it outputs
+          ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0 || true
 
-      - name: Upload IPA
-        if: success()
+      - name: Manual Clean Packaging
+        run: |
+          echo "=================================================="
+          echo "📦 Stealing the raw app for LiveContainer packaging..."
+          echo "=================================================="
+          
+          # Find the pure, untouched compiled app directly from Xcode's output
+          APP_PATH=$(find build-output -type d -name "Blink.app" | head -n 1)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ ERROR: Blink.app not found! The compiler didn't generate it."
+            exit 1
+          fi
+          
+          echo "✅ Found untouched compiled app at: $APP_PATH"
+          
+          # Create the strict structure LiveContainer requires
+          mkdir -p Pure_IPA/Payload
+          cp -R "$APP_PATH" Pure_IPA/Payload/
+          
+          # Zip it cleanly
+          cd Pure_IPA
+          zip -qr Blink-LiveContainer-Pure.ipa Payload
+          echo "✅ Clean IPA successfully generated!"
+
+      - name: Upload Pure IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-LiveContainer-v18.6.0
-          path: "dist/*.ipa"
+          name: Blink-LiveContainer-Pure
+          path: "Pure_IPA/*.ipa"
 
       - name: Upload Debug Logs
         if: always()
