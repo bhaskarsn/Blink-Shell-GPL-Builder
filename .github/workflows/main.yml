@@ -24,17 +24,14 @@ jobs:
           xcodebuild -version
 
       - name: Install dependencies
-        run: |
-          brew install cmake ninja
+        run: brew install cmake ninja
 
       - name: Clone Blink source
         run: |
           VERSION="${{ github.event.inputs.version }}"
           if [ -z "$VERSION" ]; then
-            echo "Cloning latest Blink source..."
             git clone --recursive https://github.com/blinksh/blink.git blink-src
           else
-            echo "Cloning Blink $VERSION..."
             git clone --recursive --branch "$VERSION" https://github.com/blinksh/blink.git blink-src
           fi
 
@@ -48,8 +45,21 @@ jobs:
           if [ -f "./get_resources.sh" ]; then
             ./get_resources.sh
           else
-            echo "No get_resources.sh found, skipping"
+            echo "No get_resources.sh, skipping"
           fi
+
+      - name: Create developer_setup.xcconfig
+        working-directory: blink-src
+        run: |
+          cat > developer_setup.xcconfig << 'XCCONFIG'
+          // Minimal developer setup for unsigned CI build
+          DEVELOPMENT_TEAM =
+          CODE_SIGN_IDENTITY =
+          CODE_SIGNING_REQUIRED = NO
+          CODE_SIGNING_ALLOWED = NO
+          XCCONFIG
+          echo "Created developer_setup.xcconfig"
+          cat developer_setup.xcconfig
 
       - name: Remove shared data (avoids signing conflicts)
         working-directory: blink-src
@@ -69,6 +79,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM="" \
             ONLY_ACTIVE_ARCH=NO \
             ENABLE_BITCODE=NO \
             clean build 2>&1 | tee ../build.log
