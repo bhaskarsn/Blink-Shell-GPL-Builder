@@ -12,10 +12,6 @@ jobs:
   build:
     runs-on: macos-latest
 
-    env:
-      APPLE_ID: "YOUR_EMAIL@gmail.com"
-      APPLE_PASSWORD: "xxxx-xxxx-xxxx-xxxx"
-
     steps:
       - name: Checkout GPL Builder repo
         uses: actions/checkout@v4
@@ -115,30 +111,44 @@ jobs:
             exit 1
           fi
 
-      - name: Prepare .app
+      - name: Package IPA (keep PlugIns intact)
         run: |
           APP_PATH=$(find ./build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
-          echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
-          rm -rf "$APP_PATH/PlugIns"
-          rm -rf "$APP_PATH/Watch"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.blink.shell" "$APP_PATH/Info.plist" 2>/dev/null || true
+          echo "Found .app at: $APP_PATH"
 
-      - name: Fakesign with ldid
-        run: |
-          find "$APP_PATH/Frameworks" -type f \( -name "*.dylib" -o -name "*.framework" \) 2>/dev/null | while read f; do
-            ldid -S "$f" 2>/dev/null || true
+          # Fix bundle IDs in PlugIns to match main app
+          # SideStore needs consistent bundle IDs
+          MAIN_BUNDLE_ID="com.blink.shell"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $MAIN_BUNDLE_ID" "$APP_PATH/Info.plist" 2>/dev/null || true
+
+          # Fix extension bundle IDs to be children of main
+          find "$APP_PATH/PlugIns" -name "Info.plist" 2>/dev/null | while read plist; do
+            OLD_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$plist" 2>/dev/null)
+            echo "Extension bundle ID: $OLD_ID"
+            # Keep extensions but fix their parent reference
+            /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $MAIN_BUNDLE_ID.extension" "$plist" 2>/dev/null || true
           done
-          ldid -S "$APP_PATH/Blink" 2>/dev/null || true
 
-      - name: Package IPA
-        run: |
+          # Fakesign everything with ldid
+          find "$APP_PATH" -type f | while read f; do
+            if file "$f" 2>/dev/null | grep -q "Mach-O"; then
+              ldid -S "$f" 2>/dev/null || true
+            fi
+          done
+
+          # Package with full structure intact
           rm -rf ipabuild
           mkdir -p ipabuild/Payload
           cp -r "$APP_PATH" ipabuild/Payload/
           cd ipabuild
           zip -r ../Blink.ipa Payload --symlinks
           cd ..
+
+          # Verify
+          echo "=== IPA size ==="
           ls -lh Blink.ipa
+          echo "=== IPA structure ==="
+          unzip -l Blink.ipa | grep -E "\.app/|Info\.plist" | head -20
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
