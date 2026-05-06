@@ -1,4 +1,4 @@
-name: Build Blink Shell (Auto-Xcode & Pure Package)
+name: Build Blink Shell (The Master Illusion)
 on: [workflow_dispatch]
 
 jobs:
@@ -17,88 +17,65 @@ jobs:
       - name: Setup Dependencies
         run: brew install jq automake autoconf libtool pkg-config
 
-      - name: The Upgraded Shield & Surgical Patch
+      - name: Deploy Systemless Hooks
         run: |
-          echo "Setting up Upgraded Systemless Shield..."
+          echo "Setting up System Environment Hooks..."
           mkdir -p $GITHUB_WORKSPACE/fake_bin
           
-          # 🛡️ INTERCEPTOR 1: Block destructive file edits from the main script
+          # 🛡️ HOOK 1: Protect Project DNA
           cat << 'EOF' > $GITHUB_WORKSPACE/fake_bin/sed
           #!/bin/bash
           if [[ "$*" == *"project.pbxproj"* ]]; then exit 0; fi
           if [[ "$*" == *"get_resources.sh"* ]]; then exit 0; fi
           /usr/bin/sed "$@"
           EOF
-          chmod +x $GITHUB_WORKSPACE/fake_bin/sed
           
-          # 🛡️ INTERCEPTOR 2: Hijack the compiler to patch the broken Swift code instantly before it runs
+          # 🛡️ HOOK 2: Patch iOS 18 UI Errors on the fly
           cat << 'EOF' > $GITHUB_WORKSPACE/fake_bin/xcodebuild
           #!/bin/bash
           TARGET="blink-src/Blink/SmarterKeys/KBAccessoryView.swift"
           if [ -f "$TARGET" ]; then
-              echo "🧬 SURGICAL STRIKE: Removing broken iOS 18 UI effects..."
               /usr/bin/sed -i '' 's/UIGlassEffect()/UIBlurEffect(style: .regular)/g' "$TARGET"
               /usr/bin/sed -i '' 's/UIGlassEffect/UIBlurEffect/g' "$TARGET"
               /usr/bin/sed -i '' 's/.*cornerConfiguration.*/\/\/ removed/g' "$TARGET"
           fi
-          # Hand control over to the real compiler
           /usr/bin/xcodebuild "$@"
           EOF
-          chmod +x $GITHUB_WORKSPACE/fake_bin/xcodebuild
           
-          # Activate the hooks
+          # 🛡️ HOOK 3: Neutralize Malware Injection
+          cat << 'EOF' > $GITHUB_WORKSPACE/fake_bin/insert_dylib
+          #!/bin/bash
+          echo "🛡️ Shield silently blocked insert_dylib!"
+          exit 0
+          EOF
+          
+          # 🛡️ HOOK 4: Preserve Symlinks & Purge Malware File
+          cat << 'EOF' > $GITHUB_WORKSPACE/fake_bin/zip
+          #!/bin/bash
+          find . -name "SideloadFix.dylib" -type f -delete || true
+          /usr/bin/zip -y "$@"
+          EOF
+          
+          # Make all hooks executable and hijack the PATH
+          chmod +x $GITHUB_WORKSPACE/fake_bin/*
           export PATH="$GITHUB_WORKSPACE/fake_bin:$PATH"
           
           # Fix bash syntax error in the main script
           /usr/bin/sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
           
-          # NEUTRALIZE CLEANUP
-          /usr/bin/sed -i '' 's/rm -rf /#rm -rf /g' build-blink-shell-gpl.sh
-          
-          # NEUTRALIZE MALWARE INJECTION
-          /usr/bin/sed -i '' 's/.*SideloadFix.dylib.*/# Blocked SideloadFix/g' build-blink-shell-gpl.sh
-          /usr/bin/sed -i '' 's/.*insert_dylib.*/# Blocked insert_dylib/g' build-blink-shell-gpl.sh
-          
-          echo "Compiling and forcing ALL output to a raw log file..."
+          echo "Compiling and packaging..."
           chmod +x build-blink-shell-gpl.sh
           
-          # RESTORED || true. Let the curl command crash so the workflow can proceed to packaging.
-          ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0 > $GITHUB_WORKSPACE/ultimate_debug.log 2>&1 || true
-
-      - name: Manual Clean Packaging
-        run: |
-          echo "=================================================="
-          echo "📦 Searching for the raw app to package..."
-          echo "=================================================="
-          
-          # Dynamically find the app folder instead of hardcoding the path
-          APP_PATH=$(find . -type d -name "Blink.app" | grep -v "Payload" | head -n 1)
-          
-          if [ -z "$APP_PATH" ]; then
-            echo "❌ ERROR: Blink.app not found! The compiler must have failed."
-            exit 1
-          fi
-          
-          echo "✅ Found untouched app at: $APP_PATH"
-          
-          # Print the size to prove it is not a 46MB ghost build
-          echo "📊 App Folder Size:"
-          du -sh "$APP_PATH"
-          
-          mkdir -p Pure_IPA/Payload
-          cp -R "$APP_PATH" Pure_IPA/Payload/
-          
-          cd Pure_IPA
-          # -y preserves symlinks so the internal C++ frameworks map correctly!
-          zip -qry Blink-LiveContainer-Pure.ipa Payload
-          echo "✅ Clean IPA successfully generated!"
+          # No cheats. We let the script naturally succeed.
+          ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0 > $GITHUB_WORKSPACE/ultimate_debug.log 2>&1
 
       - name: Upload Pure IPA
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Blink-LiveContainer-Pure
-          path: "Pure_IPA/*.ipa"
+          name: Blink-LiveContainer-Master
+          # The script automatically puts the final assembled IPA in the dist/ folder
+          path: "dist/*.ipa"
 
       - name: Upload Debug Logs
         if: always()
