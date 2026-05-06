@@ -11,56 +11,43 @@ jobs:
       - name: Setup Dependencies
         run: brew install jq automake autoconf libtool pkg-config
 
-      - name: Disarm the Builder Script
+      - name: The Interceptor Build
         run: |
-          # 1. DESTROY the script's ability to edit the project file
-          # This prevents it from deleting the semicolon on line 4294
-          sed -i '' 's/.*sed.*project\.pbxproj.*/echo "Skipped breaking project file"/g' build-blink-shell-gpl.sh
+          # 1. Create the Interceptor script to hijack the compiler
+          cat << 'EOF' > fake_xcodebuild
+          #!/bin/bash
+          echo "========================================"
+          echo "🛡️ INTERCEPTOR ACTIVE: Healing Project DNA..."
+          echo "========================================"
           
-          # 2. DESTROY the script's ability to run the compiler
-          # We will run xcodebuild ourselves so it doesn't crash here
-          sed -i '' 's/.*xcodebuild.*/echo "Skipped internal xcodebuild"/g' build-blink-shell-gpl.sh
+          # The script broke the file. We heal it right before Xcode opens it.
+          if [ -d "blink-src" ]; then
+              git -C blink-src checkout Blink.xcodeproj/project.pbxproj
+          elif [ -d "blink" ]; then
+              git -C blink checkout Blink.xcodeproj/project.pbxproj
+          fi
           
-          # 3. Fix the bash syntax crash (the empty brackets issue)
+          echo "🧬 Project file restored. Launching real compiler..."
+          
+          # Pass control to the real Xcode compiler with all original arguments
+          /usr/bin/xcodebuild "$@"
+          EOF
+          
+          # Make the interceptor executable
+          chmod +x fake_xcodebuild
+          
+          # 2. Swap out the word 'xcodebuild' in the script with our interceptor
+          sed -i '' 's/\bxcodebuild\b/.\/fake_xcodebuild/g' build-blink-shell-gpl.sh
+          
+          # 3. Fix the empty function crash (the original syntax error)
           sed -i '' 's/() {/() { :/g' build-blink-shell-gpl.sh
-
-      - name: Run Disarmed Script (Setup & Patch Phase)
-        run: |
-          echo "Running disarmed script to download source and patch paywall..."
+          
+          # 4. Run the builder script
           chmod +x build-blink-shell-gpl.sh
           ./build-blink-shell-gpl.sh --build --overwrite --version v18.6.0
-          echo "Script finished successfully without compiling."
 
-      - name: Manual Xcode Compilation
-        run: |
-          echo "Starting pure compilation on the UNBROKEN project file..."
-          # Running the exact command, but since the file isn't broken, it will pass
-          xcodebuild -project blink-src/Blink.xcodeproj \
-            -scheme Blink \
-            -configuration Release \
-            -destination generic/platform=iOS \
-            -derivedDataPath build-output/DerivedData \
-            CONFIGURATION_BUILD_DIR=$PWD/build-output/Products \
-            -skipPackagePluginValidation \
-            -skipMacroValidation \
-            CODE_SIGN_IDENTITY=- \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            DEAD_CODE_STRIPPING=NO \
-            ENABLE_PREVIEWS=NO \
-            build
-
-      - name: Package IPA Manually
-        run: |
-          echo "Packaging full IPA for LiveContainer..."
-          mkdir -p Payload
-          cp -R build-output/Products/Blink.app Payload/
-          
-          mkdir -p dist
-          zip -qr dist/Blink-LiveContainer-v18.6.0.ipa Payload
-          echo "Done!"
-
-      - name: Upload Final IPA
+      - name: Upload IPA
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Blink-LiveContainer-v18.6.0
